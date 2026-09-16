@@ -146,7 +146,9 @@ That's the thing you can't do with CSVs.
 
 ## Running it on Databricks
 
-Built for **Databricks Free Edition** (serverless compute). One-time setup:
+Run on **Databricks Free Edition**, serverless compute (Databricks Runtime
+19.6.x, Photon). The row counts and correlations in this README were produced
+there and reproduced byte-for-byte on a local Spark run. One-time setup:
 
 1. **Catalog** → in the `workspace` catalog, create a schema `concrete`, and
    inside it a **volume** named `raw`.
