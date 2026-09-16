@@ -175,6 +175,47 @@ config = PipelineConfig(
 
 Without `namespace`, the same code writes Delta tables to a local folder.
 
+## Deploying it as a scheduled job
+
+`databricks.yml` defines the pipeline as a **Databricks Asset Bundle** — a
+scheduled Job, deployed from the command line:
+
+```bash
+databricks bundle validate -t dev
+databricks bundle deploy   -t dev
+databricks bundle run concrete_pipeline -t dev   # trigger it now
+```
+
+Two tasks on serverless compute, the second depending on the first. Both ran
+green on Free Edition in ~100s end to end, producing the same row counts and
+correlations as the notebook and the local run:
+
+| Task | Runs | Fails the job when |
+|---|---|---|
+| `build_tables` | `scripts/run_pipeline.py --namespace workspace.concrete` | ingestion or the gate errors |
+| `validate_gold` | `scripts/validate_gold.py --namespace workspace.concrete` | a correlation points the wrong way |
+
+The job runs **the same entry points a laptop runs**, with `--namespace`
+redirecting the output to Unity Catalog. There is no Databricks-specific copy of
+the logic anywhere.
+
+`bundle deploy` builds `src/` into a wheel and installs it into the serverless
+environment, so `import concrete_pipeline` resolves in the job the same way it
+does in a venv. That is not decoration: Databricks executes a `python_file` via
+`exec()`, where `__file__` does not exist, so the usual
+`sys.path.insert(Path(__file__)...)` trick fails outright. Shipping a package is
+the fix.
+
+Targets: `dev` deploys under your user folder, prefixes the job name with
+`[dev <you>]` and forces the schedule **paused**, so a dev deploy can never
+start firing on its own. `prod` deploys to `/Workspace/Shared` and unpauses the
+daily 06:00 schedule. Catalog, schema and volume path are bundle variables, so
+prod could point at a different catalog without touching code.
+
+A note on the schedule: this dataset is static, so a daily cron is really just
+demonstrating the shape. A real incremental source would use a file-arrival
+trigger with Auto Loader, and bronze would `MERGE` rather than `overwrite`.
+
 ## Running it locally
 
 Needs Python 3.10–3.13 (PySpark doesn't support 3.14 yet) and a JDK 17.
@@ -212,10 +253,17 @@ Windows also needs `winutils.exe` and `hadoop.dll` — see
 
 ```
 src/concrete_pipeline/    all the logic (bronze, silver, gold, quality, validation)
-scripts/                  command-line entry points
-notebooks/                the Databricks entry points
+scripts/                  command-line entry points — also what the Job runs
+notebooks/                the Databricks exploratory view
+databricks.yml            the bundle: pipeline as a scheduled Job
 tests/                    pytest suite + synthetic fixture
+docs/windows-setup.md     local Windows Spark setup
 ```
+
+`src/` holds plain functions over DataFrames and imports nothing from
+Databricks. Everything else is a thin caller: the scripts parse arguments, the
+notebooks set two paths, the bundle schedules the scripts. That is what lets the
+same code run on a laptop and on serverless and produce identical output.
 
 Tests run against the fixture only, so they need neither the raw files nor
 Databricks. CI runs them on Python 3.11 and 3.12 on every push.

@@ -234,3 +234,7 @@ data/lakehouse_versioning_demo/
 spark-warehouse/
 metastore_db/
 derby.log
+
+# Wheel built by `databricks bundle deploy`.
+dist/
+*.egg-info/

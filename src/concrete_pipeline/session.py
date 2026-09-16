@@ -16,6 +16,10 @@ from pyspark.sql import SparkSession
 DELTA_EXTENSION = "io.delta.sql.DeltaSparkSessionExtension"
 DELTA_CATALOG = "org.apache.spark.sql.delta.catalog.DeltaCatalog"
 
+#: Set when `get_spark` builds a local session itself, so `stop_spark` knows
+#: whether the session is ours to shut down.
+_OWNS_SESSION = False
+
 
 # Raw: the Windows paths below contain \b, which is a backspace in a normal string.
 WINDOWS_NATIVE_HELP = r"""Hadoop's native library was not found.
@@ -57,6 +61,11 @@ def _warn_if_windows_native_missing() -> None:
     warnings.warn(WINDOWS_NATIVE_HELP, RuntimeWarning, stacklevel=3)
 
 
+def on_databricks() -> bool:
+    """True when running on Databricks compute (a notebook or a job task)."""
+    return "DATABRICKS_RUNTIME_VERSION" in os.environ
+
+
 def get_spark(
     app_name: str = "concrete-data-pipeline",
     shuffle_partitions: int = 8,
@@ -69,9 +78,18 @@ def get_spark(
     last, so callers can override anything set here -- the test suite uses it to
     strip the machinery that only pays off on data larger than a fixture.
     """
+    global _OWNS_SESSION
+
     active = SparkSession.getActiveSession()
     if active is not None:
         return active
+
+    if on_databricks():
+        # A serverless job task has no *active* session until something asks for
+        # one, but it must come from the platform. Falling through to the local
+        # builder below would try to start a local[*] Spark inside the job and
+        # write Delta to the driver's disk instead of Unity Catalog.
+        return SparkSession.builder.getOrCreate()
 
     _warn_if_windows_native_missing()
 
@@ -112,4 +130,16 @@ def get_spark(
 
     spark = builder.getOrCreate()
     spark.sparkContext.setLogLevel("ERROR")
+    _OWNS_SESSION = True
     return spark
+
+
+def stop_spark(spark: SparkSession) -> None:
+    """Stop the session only if this process was the one that started it.
+
+    A script run as a Databricks job task shares the platform's session. Calling
+    `spark.stop()` on that would tear down the runtime's own session, so the
+    entry points call this instead of stopping unconditionally.
+    """
+    if _OWNS_SESSION:
+        spark.stop()

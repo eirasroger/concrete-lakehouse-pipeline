@@ -8,15 +8,25 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from dataclasses import replace
 from pathlib import Path
 
-import _bootstrap  # noqa: F401  (adds src/ to sys.path)
+# Running from a clone: put src/ on the path and pin the interpreter Spark hands
+# to its workers. Databricks runs a job's python_file through exec(), where
+# __file__ does not exist -- there the concrete_pipeline wheel is installed into
+# the serverless environment by the bundle, so no path fixing is needed.
+try:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
+    os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
+except NameError:
+    pass
 
 from concrete_pipeline import config as cfg
 from concrete_pipeline.pipeline import print_run_report, run_pipeline
-from concrete_pipeline.session import get_spark
+from concrete_pipeline.session import get_spark, stop_spark
 
 
 def build_config(args: argparse.Namespace) -> cfg.PipelineConfig:
@@ -59,9 +69,14 @@ def main(argv: list[str] | None = None) -> int:
         target = config.namespace if config.uses_catalog else config.lakehouse_dir
         print(f"Tables written to {target}")
     finally:
-        spark.stop()
+        stop_spark(spark)
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Exit non-zero only on failure. `sys.exit(0)` would raise SystemExit, and
+    # Databricks runs a job's python_file through exec() -- there any SystemExit
+    # escaping the script is reported as a task failure, even for status 0.
+    _status = main()
+    if _status:
+        sys.exit(_status)

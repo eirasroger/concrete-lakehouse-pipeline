@@ -1,6 +1,14 @@
-# Runtime + test dependencies for a local run.
+# Dependencies for running locally. Equivalent to `pip install -e ".[dev]"`.
+#
+# These are NOT declared as package dependencies in pyproject.toml on purpose:
+# on Databricks, Spark and Delta come from the runtime, and having the wheel
+# pull its own PySpark would install a second copy over the platform's.
+#
 # Delta Lake and PySpark are version-coupled: delta-spark 3.2.x pairs with
 # PySpark 3.5.x, delta-spark 4.x with PySpark 4.x. Do not mix majors.
 pyspark>=3.5
 delta-spark>=3.2
 pytest>=8.0
+
+# Only needed to build the wheel for `databricks bundle deploy`.
+build>=1.0

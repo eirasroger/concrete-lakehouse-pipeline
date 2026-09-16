@@ -278,4 +278,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Exit non-zero only on failure. `sys.exit(0)` would raise SystemExit, and
+    # Databricks runs a job's python_file through exec() -- there any SystemExit
+    # escaping the script is reported as a task failure, even for status 0.
+    _status = main()
+    if _status:
+        sys.exit(_status)

@@ -1,0 +1,111 @@
+# Databricks Asset Bundle.
+#
+# This is the production deployment path: the pipeline as a scheduled Job,
+# deployed with `databricks bundle deploy` rather than run by hand. The
+# notebooks in notebooks/ stay as the exploratory view of the same code.
+#
+#   databricks bundle validate -t dev
+#   databricks bundle deploy   -t dev
+#   databricks bundle run concrete_pipeline -t dev
+#
+# The job runs the same scripts/ entry points a laptop runs, with --namespace
+# pointing them at Unity Catalog instead of a local folder.
+
+bundle:
+  name: concrete-lakehouse-pipeline
+
+# The pipeline ships as a wheel, built on deploy and installed into the
+# serverless environment. That is why the job's entry scripts do no sys.path
+# manipulation: `import concrete_pipeline` just resolves. Databricks executes a
+# python_file via exec(), where __file__ does not exist, so a path-based import
+# could not work there anyway.
+artifacts:
+  concrete_pipeline:
+    type: whl
+    path: .
+    build: python -m build --wheel
+
+variables:
+  catalog:
+    description: Unity Catalog catalog holding the tables.
+    default: workspace
+  schema:
+    description: Schema within the catalog.
+    default: concrete
+  raw_dir:
+    description: Volume path holding the two raw JSON files.
+    default: /Volumes/workspace/concrete/raw
+
+targets:
+  # Deploys under /Workspace/Users/<you>/.bundle/..., prefixes the job name with
+  # [dev <you>] and forces the schedule to PAUSED, so a dev deploy can never
+  # start firing on its own.
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://dbc-2f8c2de8-fdde.cloud.databricks.com
+
+  prod:
+    mode: production
+    workspace:
+      host: https://dbc-2f8c2de8-fdde.cloud.databricks.com
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      schema: concrete
+    resources:
+      jobs:
+        concrete_pipeline:
+          schedule:
+            pause_status: UNPAUSED
+
+resources:
+  jobs:
+    concrete_pipeline:
+      name: concrete-lakehouse-pipeline
+
+      # Rebuild daily at 06:00. The dataset is static, so this is really here to
+      # show the deployment shape; an incremental source would want a trigger
+      # (file arrival / Auto Loader) instead of a cron.
+      schedule:
+        quartz_cron_expression: "0 0 6 * * ?"
+        timezone_id: Europe/Madrid
+        pause_status: PAUSED
+
+      # Serverless: no job_clusters block. Free Edition has no other option, and
+      # it means there is no cluster config to drift.
+      environments:
+        - environment_key: default
+          spec:
+            client: "3"
+            dependencies:
+              - ./dist/*.whl
+
+      queue:
+        enabled: true
+
+      max_concurrent_runs: 1
+
+      tasks:
+        # Build bronze -> silver -> gold, and split rows on the quality gate.
+        - task_key: build_tables
+          spark_python_task:
+            python_file: scripts/run_pipeline.py
+            parameters:
+              - --namespace
+              - ${var.catalog}.${var.schema}
+              - --raw-dir
+              - ${var.raw_dir}
+          environment_key: default
+
+        # Fails the run if pref stops tracking the sustainability variables in
+        # the expected direction -- i.e. if the join silently broke.
+        - task_key: validate_gold
+          depends_on:
+            - task_key: build_tables
+          spark_python_task:
+            python_file: scripts/validate_gold.py
+            parameters:
+              - --namespace
+              - ${var.catalog}.${var.schema}
+          environment_key: default

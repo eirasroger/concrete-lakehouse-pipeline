@@ -14,17 +14,27 @@ Exits non-zero if any correlation points the wrong way.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from dataclasses import replace
 from pathlib import Path
 
-import _bootstrap  # noqa: F401  (adds src/ to sys.path)
+# Running from a clone: put src/ on the path and pin the interpreter Spark hands
+# to its workers. Databricks runs a job's python_file through exec(), where
+# __file__ does not exist -- there the concrete_pipeline wheel is installed into
+# the serverless environment by the bundle, so no path fixing is needed.
+try:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
+    os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
+except NameError:
+    pass
 
 from pyspark.sql import functions as F
 
 from concrete_pipeline import config as cfg
 from concrete_pipeline.bronze import read_delta
-from concrete_pipeline.session import get_spark
+from concrete_pipeline.session import get_spark, stop_spark
 from concrete_pipeline.validation import (
     EXPECTED_DIRECTIONS,
     MIN_ROWS_FOR_DIRECTION,
@@ -131,8 +141,13 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
         return 0
     finally:
-        spark.stop()
+        stop_spark(spark)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Exit non-zero only on failure. `sys.exit(0)` would raise SystemExit, and
+    # Databricks runs a job's python_file through exec() -- there any SystemExit
+    # escaping the script is reported as a task failure, even for status 0.
+    _status = main()
+    if _status:
+        sys.exit(_status)
