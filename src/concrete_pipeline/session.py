@@ -84,12 +84,19 @@ def get_spark(
         .config("spark.databricks.delta.snapshotPartitions", "2")
         .config("spark.ui.showConsoleProgress", "false")
         .config("spark.sql.session.timeZone", "UTC")
-        # Spark builds internal URLs as spark://Component@<hostname>:<port>. A
-        # hostname containing an underscore -- legal in Windows machine names,
-        # illegal in a URI authority -- makes SparkContext fail to start with
-        # "Invalid Spark URL". Pinning the driver host sidesteps the machine
-        # name entirely, which local mode never needs anyway.
-        .config("spark.driver.host", "localhost")
+        # Both of these are a literal 127.0.0.1, deliberately, and must match.
+        #
+        # Spark builds internal URLs as spark://Component@<host>:<port>. A
+        # machine name containing an underscore is legal on Windows but illegal
+        # in a URI authority, so the default makes SparkContext fail outright
+        # with "Invalid Spark URL". Pinning the driver host avoids the name.
+        #
+        # It has to be the IP and not "localhost": if the host resolves to IPv6
+        # ::1 while the driver binds to IPv4, the executor cannot reach the
+        # driver and block manager registration dies with a confusing
+        # "NullPointerException ... idWithoutTopologyInfo is null". Using the
+        # same literal address for both removes the resolution step entirely.
+        .config("spark.driver.host", "127.0.0.1")
         .config("spark.driver.bindAddress", "127.0.0.1")
     )
 
