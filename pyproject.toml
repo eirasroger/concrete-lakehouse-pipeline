@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "concrete-data-pipeline"
+version = "0.1.0"
+description = "Bronze/silver/gold Delta Lake pipeline for a context-adaptive concrete recommendation dataset"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+license = { text = "MIT" }
+authors = [{ name = "Roger Verges Eiras" }]
+keywords = ["pyspark", "delta-lake", "lakehouse", "data-quality", "concrete", "lca"]
+
+dependencies = [
+    "pyspark>=3.5",
+    "delta-spark>=3.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q --strict-markers"
+filterwarnings = [
+    # PySpark 4 on Python 3.12+ is noisy about these and they are not ours.
+    "ignore::DeprecationWarning",
+    "ignore::ResourceWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

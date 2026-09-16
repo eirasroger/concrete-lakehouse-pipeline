@@ -216,3 +216,21 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---------------------------------------------------------------------------
+# concrete-data-pipeline
+# ---------------------------------------------------------------------------
+
+# Raw research data. Licensed CC BY-NC 4.0 and ~140 MB; download it from
+# https://doi.org/10.34810/DATA3164 into data/raw/ instead of committing it.
+# tests/fixtures/ holds a small synthetic stand-in that IS committed.
+data/raw/
+
+# Delta tables produced by a run.
+data/lakehouse/
+data/lakehouse_versioning_demo/
+
+# Local Spark droppings.
+spark-warehouse/
+metastore_db/
+derby.log

@@ -1,0 +1,6 @@
+# Runtime + test dependencies for a local run.
+# Delta Lake and PySpark are version-coupled: delta-spark 3.2.x pairs with
+# PySpark 3.5.x, delta-spark 4.x with PySpark 4.x. Do not mix majors.
+pyspark>=3.5
+delta-spark>=3.2
+pytest>=8.0

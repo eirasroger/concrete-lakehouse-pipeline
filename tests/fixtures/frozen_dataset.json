@@ -1,0 +1,459 @@
+[
+  {
+    "id": "control_health_1068",
+    "stakeholder_preference": [
+      "Occupant comfort focused: tends to value thermal, acoustic, and safety performance for indoor comfort."
+    ],
+    "situations": [
+      "Thermal insulation"
+    ],
+    "alternatives": [
+      {
+        "id_prod": "prod_1",
+        "circ_orig": 88,
+        "fu_recyc": 95,
+        "fu_incin": 0,
+        "fu_inert": 5,
+        "fu_haz": 0,
+        "health": 1,
+        "gwp": 0.076,
+        "wdp": 0.042,
+        "fwu": 0.00057,
+        "b": 0.043,
+        "c": {
+          "c_p": 0.066,
+          "c_w": 0.012,
+          "c_m": 0.014
+        },
+        "compressive_strength": 52.0,
+        "slump": 185.7,
+        "water_to_cement_ratio": 0.327,
+        "cement_content": 374,
+        "SCM_content": 154,
+        "density": 2463,
+        "d_max": 12.0
+      },
+      {
+        "id_prod": "prod_2",
+        "circ_orig": 82,
+        "fu_recyc": 90,
+        "fu_incin": 0,
+        "fu_inert": 10,
+        "fu_haz": 0,
+        "health": 6,
+        "gwp": 0.076,
+        "wdp": 0.0318,
+        "fwu": 0.00083,
+        "b": 0.044,
+        "c": {
+          "c_p": 0.074,
+          "c_w": 0.015,
+          "c_m": 0.02
+        },
+        "compressive_strength": 49.1,
+        "slump": 204.1,
+        "water_to_cement_ratio": 0.398,
+        "cement_content": 357,
+        "SCM_content": 166,
+        "density": 2410,
+        "d_max": 15.4
+      },
+      {
+        "id_prod": "prod_3",
+        "circ_orig": 86,
+        "fu_recyc": 82,
+        "fu_incin": 14,
+        "fu_inert": 4,
+        "fu_haz": 0,
+        "health": 0,
+        "gwp": 0.438,
+        "wdp": 0.1679,
+        "fwu": 0.00328,
+        "b": 0.077,
+        "c": {
+          "c_p": 0.216,
+          "c_w": 0.048,
+          "c_m": 0.03
+        },
+        "compressive_strength": 22.5,
+        "slump": 29.3,
+        "water_to_cement_ratio": 0.521,
+        "cement_content": 417,
+        "SCM_content": 61,
+        "density": 2288,
+        "d_max": 20.0
+      }
+    ]
+  },
+  {
+    "id": "control_archfinish_slump_299",
+    "stakeholder_preference": [
+      "Design-led architect: tends to weight surface quality and finish above cost."
+    ],
+    "situations": [
+      "Architectural finish"
+    ],
+    "alternatives": [
+      {
+        "id_prod": "prod_1",
+        "circ_orig": 0,
+        "fu_recyc": 71,
+        "fu_incin": 0,
+        "fu_inert": 29,
+        "fu_haz": 0,
+        "health": 4,
+        "gwp": 0.152,
+        "wdp": 0.0904,
+        "fwu": 0.00141,
+        "b": 0.318,
+        "c": {
+          "c_p": 0.093,
+          "c_w": 0.021,
+          "c_m": 0.018
+        },
+        "compressive_strength": 38.4,
+        "slump": 15.5,
+        "water_to_cement_ratio": 0.442,
+        "cement_content": 331,
+        "SCM_content": 98,
+        "density": 2377,
+        "d_max": 10.0
+      },
+      {
+        "id_prod": "prod_2",
+        "circ_orig": 1,
+        "fu_recyc": 68,
+        "fu_incin": 2,
+        "fu_inert": 30,
+        "fu_haz": 0,
+        "health": 4,
+        "gwp": 0.158,
+        "wdp": 0.0912,
+        "fwu": 0.00147,
+        "b": 0.322,
+        "c": {
+          "c_p": 0.095,
+          "c_w": 0.022,
+          "c_m": 0.019
+        },
+        "compressive_strength": 37.9,
+        "slump": 145.9,
+        "water_to_cement_ratio": 0.451,
+        "cement_content": 336,
+        "SCM_content": 94,
+        "density": 2381,
+        "d_max": 10.0
+      }
+    ]
+  },
+  {
+    "id": "3782",
+    "stakeholder_preference": [
+      "Pragmatic contractor: tends to prioritise buildability, workability, and schedule certainty.",
+      "Cost-conscious developer: tends to minimise total material cost."
+    ],
+    "situations": [
+      "Standard structural application",
+      "Thermal insulation"
+    ],
+    "alternatives": [
+      {
+        "id_prod": "prod_1",
+        "circ_orig": 41,
+        "fu_recyc": 77,
+        "fu_incin": 0,
+        "fu_inert": 23,
+        "fu_haz": 0,
+        "health": 5,
+        "gwp": 0.121,
+        "wdp": 0.0688,
+        "fwu": 0.00112,
+        "b": 0.187,
+        "c": {
+          "c_p": 0.081,
+          "c_w": 0.017,
+          "c_m": 0.016
+        },
+        "compressive_strength": 45.2,
+        "slump": 168.0,
+        "water_to_cement_ratio": 0.381,
+        "cement_content": 344,
+        "SCM_content": 141,
+        "density": 2401,
+        "d_max": 16.0
+      },
+      {
+        "id_prod": "prod_2",
+        "circ_orig": 63,
+        "fu_recyc": 88,
+        "fu_incin": 0,
+        "fu_inert": 12,
+        "fu_haz": 0,
+        "health": 6,
+        "gwp": 0.094,
+        "wdp": 0.0521,
+        "fwu": 0.00089,
+        "b": 0.204,
+        "c": {
+          "c_p": 0.072,
+          "c_w": 0.014,
+          "c_m": 0.015
+        },
+        "compressive_strength": 48.7,
+        "slump": 191.2,
+        "water_to_cement_ratio": 0.362,
+        "cement_content": 358,
+        "SCM_content": 162,
+        "density": 2388,
+        "d_max": 14.0
+      },
+      {
+        "id_prod": "prod_3",
+        "circ_orig": 29,
+        "fu_recyc": 64,
+        "fu_incin": 1,
+        "fu_inert": 34,
+        "fu_haz": 1,
+        "health": 3,
+        "gwp": 0.264,
+        "wdp": 0.1341,
+        "fwu": 0.00218,
+        "b": 0.141,
+        "c": {
+          "c_p": 0.138,
+          "c_w": 0.031,
+          "c_m": 0.024
+        },
+        "compressive_strength": 31.8,
+        "slump": 88.4,
+        "water_to_cement_ratio": 0.498,
+        "cement_content": 392,
+        "SCM_content": 77,
+        "density": 2334,
+        "d_max": 20.0
+      },
+      {
+        "id_prod": "prod_4",
+        "circ_orig": 55,
+        "fu_recyc": 80,
+        "fu_incin": 0,
+        "fu_inert": 20,
+        "fu_haz": 0,
+        "health": 4,
+        "gwp": 0.133,
+        "wdp": 0.0742,
+        "fwu": 0.00124,
+        "b": 0.176,
+        "c": {
+          "c_p": 0.086,
+          "c_w": 0.019,
+          "c_m": 0.017
+        },
+        "compressive_strength": 43.6,
+        "slump": 154.3,
+        "water_to_cement_ratio": 1.35,
+        "cement_content": 349,
+        "SCM_content": 133,
+        "density": 950,
+        "d_max": 16.0
+      }
+    ]
+  },
+  {
+    "id": "expert_118",
+    "stakeholder_preference": [
+      "Sustainability maximalist: tends to prioritise low environmental impact and high circularity above other considerations."
+    ],
+    "situations": [
+      "Standard structural application"
+    ],
+    "alternatives": [
+      {
+        "id_prod": "prod_1",
+        "circ_orig": 74,
+        "fu_recyc": 91,
+        "fu_incin": 0,
+        "fu_inert": 9,
+        "fu_haz": 0,
+        "health": 5,
+        "gwp": 0.088,
+        "wdp": 0.0473,
+        "fwu": 0.00081,
+        "b": 0.233,
+        "c": {
+          "c_p": 0.069,
+          "c_w": 0.013,
+          "c_m": 0.014
+        },
+        "compressive_strength": 46.9,
+        "slump": 177.5,
+        "water_to_cement_ratio": 0.374,
+        "cement_content": 341,
+        "SCM_content": 158,
+        "density": 2394,
+        "d_max": 12.0
+      },
+      {
+        "id_prod": "prod_2",
+        "circ_orig": 91,
+        "fu_recyc": 97,
+        "fu_incin": 0,
+        "fu_inert": 3,
+        "fu_haz": 0,
+        "health": 6,
+        "gwp": 0.067,
+        "wdp": 0.0349,
+        "fwu": 0.00062,
+        "b": 0.261,
+        "c": {
+          "c_p": 0.063,
+          "c_w": 0.011,
+          "c_m": 0.013
+        },
+        "compressive_strength": 50.3,
+        "slump": 188.9,
+        "water_to_cement_ratio": 0.351,
+        "cement_content": 333,
+        "SCM_content": 171,
+        "density": 2372,
+        "d_max": 12.0
+      }
+    ]
+  },
+  {
+    "id": "2647",
+    "stakeholder_preference": [
+      "Health and safety focused: tends to reject options with hazardous waste or poor health scores."
+    ],
+    "situations": [
+      "Standard structural application"
+    ],
+    "alternatives": [
+      {
+        "id_prod": "prod_1",
+        "circ_orig": 48,
+        "fu_recyc": 0,
+        "fu_incin": 0,
+        "fu_inert": 100,
+        "fu_haz": 0,
+        "health": 0,
+        "gwp": 0.211,
+        "wdp": 0.1122,
+        "fwu": 0.00179,
+        "b": 0.098,
+        "c": {
+          "c_p": 0.112,
+          "c_w": 0.026,
+          "c_m": 0.021
+        },
+        "compressive_strength": 35.1,
+        "slump": 121.6,
+        "water_to_cement_ratio": 0.468,
+        "cement_content": 378,
+        "SCM_content": 89,
+        "density": 2352,
+        "d_max": 20.0
+      },
+      {
+        "id_prod": "prod_2",
+        "circ_orig": 67,
+        "fu_recyc": 85,
+        "fu_incin": 0,
+        "fu_inert": 15,
+        "fu_haz": 0,
+        "health": 6,
+        "gwp": 0.102,
+        "wdp": 0.0587,
+        "fwu": 0.00096,
+        "b": 0.219,
+        "c": {
+          "c_p": 0.077,
+          "c_w": 0.016,
+          "c_m": 0.015
+        },
+        "compressive_strength": 47.4,
+        "slump": 181.3,
+        "water_to_cement_ratio": 0.377,
+        "cement_content": 351,
+        "SCM_content": 149,
+        "density": 2397,
+        "d_max": 14.0
+      },
+      {
+        "id_prod": "prod_3",
+        "circ_orig": 58,
+        "fu_recyc": 79,
+        "fu_incin": 3,
+        "fu_inert": 18,
+        "fu_haz": 0,
+        "health": 5,
+        "gwp": 0.129,
+        "wdp": 0.0701,
+        "fwu": 0.00118,
+        "b": 0.193,
+        "c": {
+          "c_p": 0.084,
+          "c_w": 0.018,
+          "c_m": 0.017
+        },
+        "compressive_strength": 44.0,
+        "slump": 159.8,
+        "water_to_cement_ratio": 0.394,
+        "cement_content": 347,
+        "SCM_content": 137,
+        "density": 2386,
+        "d_max": 16.0
+      },
+      {
+        "id_prod": "prod_4",
+        "circ_orig": 33,
+        "fu_recyc": 58,
+        "fu_incin": 0,
+        "fu_inert": 40,
+        "fu_haz": 2,
+        "health": 2,
+        "gwp": 0.297,
+        "wdp": 0.1488,
+        "fwu": 0.00241,
+        "b": 0.124,
+        "c": {
+          "c_p": 0.151,
+          "c_w": 0.034,
+          "c_m": 0.026
+        },
+        "compressive_strength": 28.6,
+        "slump": 64.2,
+        "water_to_cement_ratio": 0.529,
+        "cement_content": 404,
+        "SCM_content": 68,
+        "density": 2311,
+        "d_max": 25.0
+      },
+      {
+        "id_prod": "prod_5",
+        "circ_orig": 71,
+        "fu_recyc": 89,
+        "fu_incin": 0,
+        "fu_inert": 11,
+        "fu_haz": 0,
+        "health": 6,
+        "gwp": 0.085,
+        "wdp": 0.0462,
+        "fwu": 0.00078,
+        "b": 0.241,
+        "c": {
+          "c_p": 0.071,
+          "c_w": 0.014,
+          "c_m": 0.014
+        },
+        "compressive_strength": 49.8,
+        "slump": 186.4,
+        "water_to_cement_ratio": 0.358,
+        "cement_content": 339,
+        "SCM_content": 164,
+        "density": 2379,
+        "d_max": 12.0
+      }
+    ]
+  }
+]
