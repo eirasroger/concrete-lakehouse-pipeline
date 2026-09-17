@@ -7,8 +7,10 @@ contain (a scenario missing from one file, a product set mismatch).
 
 from __future__ import annotations
 
+import pytest
 from pyspark.sql import functions as F
 
+from concrete_pipeline import config as cfg
 from concrete_pipeline import quality
 from concrete_pipeline.config import QualityThresholds
 from concrete_pipeline.gold import join_labels_and_features
@@ -37,8 +39,6 @@ def test_clean_rows_are_promoted(gold):
 
 def test_gate_loses_nothing(result, gold, rejected):
     """Promoted + rejected must account for every joined row."""
-    from concrete_pipeline import config as cfg
-
     joined = join_labels_and_features(
         result.silver[cfg.SILVER_LABELS], result.silver[cfg.SILVER_FEATURES]
     )
@@ -220,3 +220,50 @@ def test_real_data_ranges_are_not_rejected(spark):
     )
     assert reasons_for(gated, "s1", "prod_1") == [[]]
     assert reasons_for(gated, "s1", "prod_2") == [[]]
+
+
+# --------------------------------------------------------------------------
+# The gate's failing thresholds
+# --------------------------------------------------------------------------
+
+GATE_SCHEMA = "scenario_id string, source_type string, rejection_reasons array<string>"
+
+
+def _rejected(spark, rows):
+    return spark.createDataFrame(rows, GATE_SCHEMA)
+
+
+def test_a_few_rejections_do_not_fail_the_run(spark):
+    """The published data rejects 4 of 149,672 rows. That must stay green."""
+    rejected = _rejected(spark, [("s1", "llm_generated", ["duplicate_scenario_product"])])
+    quality.enforce_gate_limits(9_999, rejected, cfg.GateLimits())
+
+
+def test_too_many_rejections_fail_the_run(spark):
+    """Recording a problem is not noticing one -- a spike has to go red."""
+    rejected = _rejected(
+        spark, [(f"s{i}", "llm_generated", ["pref_out_of_bounds"]) for i in range(20)]
+    )
+    with pytest.raises(quality.GateFailure, match="above the limit"):
+        quality.enforce_gate_limits(100, rejected, cfg.GateLimits())
+
+
+def test_absolute_row_limit_is_enforced(spark):
+    rejected = _rejected(
+        spark, [(f"s{i}", "llm_generated", ["pref_out_of_bounds"]) for i in range(5)]
+    )
+    limits = cfg.GateLimits(max_rejected_rows=2, max_rejected_fraction=1.0)
+    with pytest.raises(quality.GateFailure, match="above the limit of 2"):
+        quality.enforce_gate_limits(1_000_000, rejected, limits)
+
+
+def test_an_unrecognised_scenario_id_fails_the_run(spark):
+    """`unknown` means the id taxonomy changed upstream and needs re-profiling."""
+    rejected = _rejected(spark, [("weird_new_shape", "unknown", ["missing_label_row"])])
+    with pytest.raises(quality.GateFailure, match="no longer match any known pattern"):
+        quality.enforce_gate_limits(1_000_000, rejected, cfg.GateLimits())
+
+
+def test_an_empty_run_is_not_a_failure(spark):
+    """Nothing ingested means nothing to judge, not a division by zero."""
+    quality.enforce_gate_limits(0, _rejected(spark, []), cfg.GateLimits())

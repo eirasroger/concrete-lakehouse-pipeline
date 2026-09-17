@@ -21,3 +21,41 @@ The gate rejects 4 and promotes 13.
 Two scenarios also exercise the multi-value scenario attributes: `3782` carries
 two `stakeholder_preference` entries and two `situations`, matching the real
 data where those arrays reach length 3 and 2 respectively.
+
+## The incremental fixtures
+
+The pipeline has to handle both ways new data can arrive, so there is a fixture
+for each. Tests copy the base files into a temporary directory, run, then add or
+replace files and run again.
+
+### `batch2/` — a new file arrives alongside the old
+
+`labelled_alternatives_batch2.json` and `frozen_dataset_batch2.json` add two
+scenarios that are not in the base fixture:
+
+| scenario | family | products | labels |
+|---|---|---|---|
+| `control_gwp_777` | control_synthetic | 2 | 2 |
+| `expert_9` | expert_annotated | 3 | 3 |
+
+Both are clean, so the second run should promote 5 more rows and leave the
+original 13 untouched. That "untouched" part is the assertion that matters — it
+proves the run was incremental rather than a silent full rebuild.
+
+### `revised/` — the same file replaced with corrected content
+
+`labelled_alternatives.json`, **same filename** as the base fixture but different
+content, so only the content hash distinguishes it. Three changes, each testing
+a different merge clause:
+
+| scenario | change | tests |
+|---|---|---|
+| `control_health_1068` | `prod_1` pref 0.393 → 0.5 | `WHEN MATCHED THEN UPDATE` |
+| `2647` | duplicate `prod_1` label removed, 6 labels → 5 | `WHEN NOT MATCHED BY SOURCE THEN DELETE` |
+| `2647` | `prod_5` pref 1.4 → 0.97 | a previously rejected row now promotes |
+
+The `2647` case is the important one. Its label count shrinks, so a pipeline
+without the delete clause would keep the orphaned sixth row forever — and
+because the duplicate is gone, `2647/prod_1` should move *out* of
+`gold_scenarios_rejected` and into `gold_scenarios`. After the revision the
+fixture should reject only 1 row instead of 4.

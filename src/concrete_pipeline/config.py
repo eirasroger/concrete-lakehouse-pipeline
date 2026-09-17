@@ -17,6 +17,7 @@ FEATURE_FILE_CANDIDATES = ("frozen_dataset.json",)
 
 BRONZE_LABELS = "bronze_labels"
 BRONZE_FEATURES = "bronze_features"
+BRONZE_INGEST_LOG = "bronze_ingest_log"
 SILVER_LABELS = "silver_labels"
 SILVER_FEATURES = "silver_features"
 SILVER_SCENARIO_STAKEHOLDER = "silver_scenario_stakeholder"
@@ -36,6 +37,45 @@ class RangeRule:
     @property
     def rejection_reason(self) -> str:
         return f"{self.column}_out_of_range"
+
+
+#: Glob patterns matching each raw source. Both arrival patterns are covered by
+#: globbing rather than naming exact files: a new batch dropped alongside the
+#: original (`labelled_alternatives_batch2.json`) is picked up automatically.
+LABEL_FILE_GLOBS = ("labelled_alternatives*.json", "labelled_dataset*.json")
+FEATURE_FILE_GLOBS = ("frozen_dataset*.json",)
+
+
+@dataclass(frozen=True)
+class IngestLimits:
+    """Bounds on how incremental processing behaves.
+
+    `max_scenarios_for_merge` is the point at which a targeted `MERGE` stops
+    paying off. A merge scoped to a set of scenario ids has to name them in its
+    delete predicate, so a very large change set is both slower and uglier than
+    simply rebuilding the table. Crossing this threshold is normal on a first
+    load or a full re-release, not an error.
+    """
+
+    max_scenarios_for_merge: int = 5_000
+
+
+@dataclass(frozen=True)
+class GateLimits:
+    """When a run should fail rather than just record its rejections.
+
+    The gate always routes bad rows to `gold_scenarios_rejected`. These bounds
+    decide when the *volume* of rejections means the upstream data is broken and
+    a scheduled run should go red instead of quietly succeeding.
+
+    The published data rejects 4 of 149,672 rows (0.003%), so 1% is roughly a
+    300x margin -- loose enough not to be noise, tight enough that a structural
+    break in a future release trips it.
+    """
+
+    max_rejected_rows: int | None = None
+    max_rejected_fraction: float = 0.01
+    fail_on_unknown_source_type: bool = True
 
 
 @dataclass(frozen=True)
@@ -78,6 +118,13 @@ class PipelineConfig:
     lakehouse_dir: Path = REPO_ROOT / "data" / "lakehouse"
     namespace: str | None = None
     thresholds: QualityThresholds = field(default_factory=QualityThresholds)
+    gate_limits: GateLimits = field(default_factory=GateLimits)
+    ingest_limits: IngestLimits = field(default_factory=IngestLimits)
+    #: Use Databricks Auto Loader for file discovery instead of the portable
+    #: hash-log reader. Only affects *new* files -- see `ingest.py`.
+    use_autoloader: bool = False
+    #: Checkpoint location required by Auto Loader. A volume path on Databricks.
+    checkpoint_dir: Path | None = None
 
     @property
     def uses_catalog(self) -> bool:
@@ -95,24 +142,58 @@ class PipelineConfig:
         return str((self.lakehouse_dir / table).resolve())
 
     def resolve_label_file(self) -> Path:
-        return _resolve(self.raw_dir, LABEL_FILE_CANDIDATES, "labels")
+        """The single newest labels file. Kept for the one-shot exploration path."""
+        return _resolve_one(self.raw_dir, LABEL_FILE_CANDIDATES, "labels")
 
     def resolve_feature_file(self) -> Path:
-        return _resolve(self.raw_dir, FEATURE_FILE_CANDIDATES, "features")
+        return _resolve_one(self.raw_dir, FEATURE_FILE_CANDIDATES, "features")
+
+    def label_files(self) -> list[Path]:
+        """Every labels file present, including later batches."""
+        return _glob_sources(self.raw_dir, LABEL_FILE_GLOBS, "labels")
+
+    def feature_files(self) -> list[Path]:
+        """Every features file present, including later batches."""
+        return _glob_sources(self.raw_dir, FEATURE_FILE_GLOBS, "features")
 
     @classmethod
     def for_fixtures(cls, lakehouse_dir: Path) -> "PipelineConfig":
-        """Config pointing at the synthetic fixture, for tests and local demos."""
-        return cls(raw_dir=REPO_ROOT / "tests" / "fixtures", lakehouse_dir=lakehouse_dir)
+        """Config pointing at the synthetic fixture, for tests and local demos.
+
+        The gate's volume limits are relaxed here on purpose. The fixture plants
+        4 defects in 17 rows so that every rejection reason is exercised -- 23%,
+        against a production limit of 1%. Keeping the strict limit would make the
+        fixture fail every run, and lowering the *production* limit to accommodate
+        a deliberately broken fixture would be exactly the wrong trade.
+        """
+        return cls(
+            raw_dir=REPO_ROOT / "tests" / "fixtures",
+            lakehouse_dir=lakehouse_dir,
+            gate_limits=GateLimits(max_rejected_fraction=1.0),
+        )
 
 
-def _resolve(raw_dir: Path, candidates: tuple[str, ...], kind: str) -> Path:
+def _missing(raw_dir: Path, patterns: tuple[str, ...], kind: str) -> FileNotFoundError:
+    return FileNotFoundError(
+        f"No {kind} file found in {raw_dir}. Expected something matching {patterns}.\n"
+        "The raw files are not committed (CC BY-NC 4.0). Download them from\n"
+        "https://doi.org/10.34810/DATA3164 and place them in data/raw/."
+    )
+
+
+def _resolve_one(raw_dir: Path, candidates: tuple[str, ...], kind: str) -> Path:
     for name in candidates:
         path = raw_dir / name
         if path.exists():
             return path
-    raise FileNotFoundError(
-        f"No {kind} file found in {raw_dir}. Expected one of {candidates}.\n"
-        "The raw files are not committed (CC BY-NC 4.0). Download them from\n"
-        "https://doi.org/10.34810/DATA3164 and place them in data/raw/."
-    )
+    raise _missing(raw_dir, candidates, kind)
+
+
+def _glob_sources(raw_dir: Path, patterns: tuple[str, ...], kind: str) -> list[Path]:
+    found: list[Path] = []
+    for pattern in patterns:
+        found.extend(sorted(raw_dir.glob(pattern)))
+    unique = sorted({p.resolve() for p in found if p.is_file()})
+    if not unique:
+        raise _missing(raw_dir, patterns, kind)
+    return unique

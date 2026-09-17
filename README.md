@@ -41,16 +41,58 @@ actually use.
 Splitting it this way means a bug in the unpacking is fixed by rebuilding silver
 and gold — no need to touch the 140 MB of raw input again.
 
+## It only processes what changed
+
+A run does not rebuild the tables. It works out what is actually new, and
+touches only that:
+
+1. **Hash every raw file** and compare against `bronze_ingest_log`. Nothing new
+   means the run writes nothing at all.
+2. **Append** unseen files to bronze, tagged with their content hash. Bronze is
+   append-only, so every version of every file it has ever seen is still there.
+3. **Upsert silver** for the scenarios those files contain — insert, update, and
+   **delete rows a scenario has lost**.
+4. **Read silver's Change Data Feed** to find which scenarios actually moved,
+   and recompute gold for exactly those.
+
+Three details in there are the whole design:
+
+**Identifying files by content, not by name.** Two things can happen: a new file
+lands beside the old one, or the same file is replaced with a corrected superset
+— which is what a dataset re-release at a DOI looks like. Auto Loader, the
+obvious tool here, handles the first and **structurally cannot handle the
+second**: it tracks work by file path and deliberately ignores modifications, so
+a rewritten `frozen_dataset.json` is silently skipped. A SHA-256 per file catches
+both with one rule, costs about a second on 140 MB, and makes a re-run a no-op
+instead of a double load.
+
+**Deleting, not just upserting.** If a re-release drops a scenario from 6 labels
+to 3, a merge that only inserts and updates leaves 3 stale rows behind forever,
+and no row count anywhere reveals it — the table just keeps answering with data
+the source no longer contains. So the merge has a third clause, `WHEN NOT
+MATCHED BY SOURCE THEN DELETE`, scoped to the scenarios in the batch.
+
+**Asking the table what changed, not the code.** Gold could be told which
+scenarios were ingested. It reads silver's change feed instead, so a manual
+correction to silver, or a previous run that died between silver and gold, still
+produces the right gold rows.
+
+That last point has a consequence worth stating: `(scenario_id, id_prod)` is
+**not** a unique key — scenarios `2647` and `13122` label `prod_1` twice — and a
+`MERGE` on a non-unique key fails outright. So every silver row carries an
+ordinal from `posexplode`, which is what gives it a stable identity.
+
 ## The tables
 
 | Table | One row per | Rows |
 |---|---|---|
+| `bronze_ingest_log` | file version consumed, by content hash | 2 |
 | `bronze_labels` / `bronze_features` | scenario, still nested | 42,874 each |
-| `silver_labels` | scenario + product, with preference score | 149,672 |
-| `silver_features` | scenario + product, with properties | 149,670 |
-| `silver_scenario_stakeholder` | scenario + stakeholder | 45,146 |
-| `silver_scenario_situation` | scenario + situation | 43,755 |
-| **`gold_scenarios`** | **scenario + product, everything joined** | **149,668** |
+| `silver_labels` | scenario + label ordinal | 149,672 |
+| `silver_features` | scenario + alternative ordinal | 149,670 |
+| `silver_scenario_stakeholder` | scenario + stakeholder ordinal | 45,146 |
+| `silver_scenario_situation` | scenario + situation ordinal | 43,755 |
+| **`gold_scenarios`** | **label + its product's features** | **149,668** |
 | `gold_scenarios_rejected` | rejected row, with reasons | 4 |
 
 ## The quality gate
@@ -74,6 +116,19 @@ Those 4 failures are a real error in the source data: scenarios `2647` and
 at confidence 0.75 against 0.05 at confidence 0.95). Both copies are rejected —
 the source gives no basis for picking a winner. The other products in those
 scenarios promote normally.
+
+**Recording a problem isn't the same as noticing one.** A scheduled job whose
+input has structurally broken would otherwise go green every night while writing
+a progressively emptier gold table. So the run *fails* when:
+
+- rejections exceed **1%** of rows (the real data is at 0.003%, a ~300x margin)
+- any row lands with `source_type = unknown`, meaning the scenario ids no longer
+  match any pattern the classifier knows and it needs updating
+
+`gold_scenarios` also carries Delta `CHECK` constraints — `pref` and `conf` in
+[0,1], a known `source_type`, both sides of the join present. The gate already
+guarantees these; the constraints make it the *table's* guarantee, so a future
+writer that bypasses this pipeline can't quietly violate it.
 
 ## Where the data came from (`source_type`)
 
@@ -186,14 +241,20 @@ databricks bundle deploy   -t dev
 databricks bundle run concrete_pipeline -t dev   # trigger it now
 ```
 
-Two tasks on serverless compute, the second depending on the first. Both ran
-green on Free Edition in ~100s end to end, producing the same row counts and
-correlations as the notebook and the local run:
+Three tasks on serverless compute, chained. Ran green on Free Edition in ~100s
+end to end, producing the same row counts and correlations as the notebook and
+the local run:
 
 | Task | Runs | Fails the job when |
 |---|---|---|
-| `build_tables` | `scripts/run_pipeline.py --namespace workspace.concrete` | ingestion or the gate errors |
-| `validate_gold` | `scripts/validate_gold.py --namespace workspace.concrete` | a correlation points the wrong way |
+| `build_tables` | `run_pipeline.py --namespace workspace.concrete` | ingestion breaks, or rejections exceed the gate's limits |
+| `validate_gold` | `validate_gold.py --namespace workspace.concrete` | a correlation points the wrong way |
+| `maintain_tables` | `maintain_tables.py --retain-hours 168` | compaction fails |
+
+Maintenance is last, and off the ingest path, for two reasons: compacting a bad
+batch into the table it broke is worse than leaving it fragmented, and `VACUUM`
+permanently destroys the time travel the versioning demo depends on. A week of
+history is retained.
 
 The job runs **the same entry points a laptop runs**, with `--namespace`
 redirecting the output to Unity Catalog. There is no Databricks-specific copy of
@@ -233,11 +294,25 @@ them from [the DOI](https://doi.org/10.34810/DATA3164) and put them in
 
 ```bash
 python scripts/explore_raw.py            # profile the raw files
-python scripts/run_pipeline.py           # build bronze -> silver -> gold
+python scripts/run_pipeline.py           # ingest whatever is new
+python scripts/run_pipeline.py --full-refresh   # reprocess every scenario
 python scripts/validate_gold.py          # the direction check
+python scripts/maintain_tables.py        # OPTIMIZE + VACUUM
 python scripts/delta_versioning_demo.py  # the time-travel diff
-pytest -q                                # 80 tests, ~3 min, fixture only
+
+pytest -m "not spark"                    # pure logic, ~1s
+pytest                                   # everything, several minutes
 ```
+
+Running `run_pipeline.py` twice does nothing the second time — that's the point.
+Use `--full-refresh` after changing the classifier or a transformation, since
+the source files haven't changed but their derived rows have.
+
+Most of the test time is Spark: each assertion is a real job, and `MERGE` is
+several. The `not spark` subset — the classifier, the direction logic, the
+config, and the serverless-portability guards — is 34 of the 113 tests and runs in under 2s. The marker is applied
+automatically based on which fixtures a test requests, so nothing has to be
+labelled by hand.
 
 For a real run, give the driver some room first — both files are one big JSON
 array, so Spark has to read each in a single task:
@@ -252,11 +327,26 @@ Windows also needs `winutils.exe` and `hadoop.dll` — see
 ## Layout
 
 ```
-src/concrete_pipeline/    all the logic (bronze, silver, gold, quality, validation)
+src/concrete_pipeline/
+    ingest.py       content hashing, the ingestion log, what to read
+    bronze.py       append-only landing + Delta read/write/time-travel helpers
+    upsert.py       scenario-scoped MERGE, including the delete clause
+    silver.py       posexplode into flat tables, then upsert
+    changes.py      Change Data Feed -> which scenarios actually moved
+    gold.py         join, gate, upsert, CHECK constraints
+    quality.py      rejection reasons and the failing thresholds
+    validation.py   correlation direction checks
+    maintenance.py  OPTIMIZE / VACUUM
+    pipeline.py     orchestration and the run report
+    config.py       paths, namespaces, thresholds, limits
+    schemas.py      explicit schemas for both raw files
+    session.py      Spark session (local, notebook, or job)
+    source_type.py  the provenance classifier, and its defective ancestor
+
 scripts/                  command-line entry points — also what the Job runs
 notebooks/                the Databricks exploratory view
 databricks.yml            the bundle: pipeline as a scheduled Job
-tests/                    pytest suite + synthetic fixture
+tests/                    pytest suite + synthetic fixtures
 docs/windows-setup.md     local Windows Spark setup
 ```
 
@@ -265,8 +355,19 @@ Databricks. Everything else is a thin caller: the scripts parse arguments, the
 notebooks set two paths, the bundle schedules the scripts. That is what lets the
 same code run on a laptop and on serverless and produce identical output.
 
-Tests run against the fixture only, so they need neither the raw files nor
-Databricks. CI runs them on Python 3.11 and 3.12 on every push.
+Tests run against the fixtures only, so they need neither the raw files nor
+Databricks. 113 of them, including a four-stage integration test that drives a
+first load, a no-op re-run, a new batch arriving, and a file being replaced —
+asserting at each stage that only the affected scenarios moved. CI runs the lot
+on Python 3.11 and 3.12 on every push.
+
+`tests/test_portability.py` is worth a mention: it parses the AST of everything
+under `src/`, `scripts/` and `notebooks/` and fails if it finds `cache()`,
+`persist()` or `.rdd`. Databricks serverless runs on Spark Connect and rejects
+all three, but `cache()` is lazy — so the failure appears minutes into a job
+run, in a stack trace that names a thread pool rather than the line at fault.
+Both of those cost a full deploy-and-run cycle to diagnose before the guard
+existed.
 
 ## Citation
 

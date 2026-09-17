@@ -109,3 +109,19 @@ resources:
               - --namespace
               - ${var.catalog}.${var.schema}
           environment_key: default
+
+        # Compaction, kept off the ingest path. Incremental MERGEs rewrite only
+        # the files they touch, so small files accumulate; OPTIMIZE compacts them
+        # and VACUUM expires the versions those rewrites orphaned. Runs after
+        # validation so a bad batch is never compacted into the table it broke.
+        - task_key: maintain_tables
+          depends_on:
+            - task_key: validate_gold
+          spark_python_task:
+            python_file: scripts/maintain_tables.py
+            parameters:
+              - --namespace
+              - ${var.catalog}.${var.schema}
+              - --retain-hours
+              - "168"
+          environment_key: default

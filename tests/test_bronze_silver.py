@@ -53,7 +53,15 @@ def test_silver_features_flattens_the_cost_struct(result):
 
 def test_silver_features_carries_every_feature_column(result):
     features = result.silver[cfg.SILVER_FEATURES]
-    expected = {"scenario_id", "id_prod", *FEATURE_COLUMNS, *COST_COLUMNS}
+    expected = {
+        "scenario_id",
+        "id_prod",
+        "alternative_ordinal",  # stable row identity, for the incremental merge
+        *FEATURE_COLUMNS,
+        *COST_COLUMNS,
+        "_source_file",  # lineage: which file version this row came from
+        "_batch_id",
+    }
     assert set(features.columns) == expected
 
 
@@ -89,3 +97,26 @@ def test_scenario_tables_do_not_multiply_the_fact_grain(result):
     """The reason these live in their own tables rather than on the label rows."""
     labels = result.silver[cfg.SILVER_LABELS]
     assert labels.filter(F.col("scenario_id") == "3782").count() == 4
+
+
+def test_silver_rows_carry_a_stable_ordinal(result):
+    """`(scenario_id, id_prod)` is not unique, so merges key on the ordinal.
+
+    Scenario 2647 labels prod_1 twice. Without the ordinal, an incremental MERGE
+    fails with "multiple source rows matched".
+    """
+    labels = result.silver[cfg.SILVER_LABELS]
+    total = labels.count()
+    assert labels.select("scenario_id", "label_ordinal").distinct().count() == total
+    # ... and the non-unique alternative is still there, just identifiable now.
+    duplicated = labels.filter(
+        (F.col("scenario_id") == "2647") & (F.col("id_prod") == "prod_1")
+    )
+    assert duplicated.count() == 2
+    assert sorted(r["label_ordinal"] for r in duplicated.collect()) == [0, 5]
+
+
+def test_ingest_log_records_what_was_read(result):
+    """Provenance for the whole run: which file, and which version of it."""
+    assert len(result.ingested_files) == 2
+    assert all(len(s.file_hash) == 64 for s in result.ingested_files)

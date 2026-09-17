@@ -30,7 +30,7 @@ from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
-from .config import QualityThresholds
+from .config import GateLimits, QualityThresholds
 
 REASON_PREF_BOUNDS = "pref_out_of_bounds"
 REASON_CONF_BOUNDS = "conf_out_of_bounds"
@@ -124,6 +124,50 @@ def split_on_gate(df: DataFrame) -> tuple[DataFrame, DataFrame]:
     passed = df.filter(F.size("rejection_reasons") == 0).drop("rejection_reasons")
     rejected = df.filter(F.size("rejection_reasons") > 0)
     return passed, rejected
+
+
+class GateFailure(RuntimeError):
+    """Raised when the volume of rejections means the run should not succeed."""
+
+
+def enforce_gate_limits(
+    passed_count: int, rejected: DataFrame, limits: GateLimits
+) -> None:
+    """Fail the run when rejections exceed what a healthy batch should produce.
+
+    Routing bad rows to a table is necessary but not sufficient: a scheduled job
+    whose input has structurally broken would otherwise go green every night
+    while writing a progressively emptier gold table. These bounds are the
+    difference between recording a problem and noticing one.
+    """
+    rejected_count = rejected.count()
+    total = passed_count + rejected_count
+    if total == 0:
+        return
+
+    if limits.max_rejected_rows is not None and rejected_count > limits.max_rejected_rows:
+        raise GateFailure(
+            f"{rejected_count:,} rows rejected, above the limit of "
+            f"{limits.max_rejected_rows:,}. See gold_scenarios_rejected."
+        )
+
+    fraction = rejected_count / total
+    if fraction > limits.max_rejected_fraction:
+        raise GateFailure(
+            f"{rejected_count:,} of {total:,} rows rejected ({fraction:.2%}), above the "
+            f"limit of {limits.max_rejected_fraction:.2%}. See gold_scenarios_rejected."
+        )
+
+    if limits.fail_on_unknown_source_type:
+        from .source_type import UNKNOWN
+
+        unknown = rejected.filter(F.col("source_type") == UNKNOWN).count()
+        if unknown:
+            raise GateFailure(
+                f"{unknown:,} rows have source_type '{UNKNOWN}': the scenario ids no "
+                "longer match any known pattern. The classifier needs updating -- see "
+                "scripts/explore_raw.py and src/concrete_pipeline/source_type.py."
+            )
 
 
 def gate_summary(rejected: DataFrame) -> DataFrame:

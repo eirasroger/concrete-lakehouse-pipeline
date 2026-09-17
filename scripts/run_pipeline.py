@@ -55,16 +55,16 @@ def main(argv: list[str] | None = None) -> int:
         help="run against tests/fixtures instead of the real files",
     )
     parser.add_argument(
-        "--infer-schema",
+        "--full-refresh",
         action="store_true",
-        help="let Spark infer the JSON schema instead of using the pinned one",
+        help="reprocess every scenario in bronze instead of only what changed",
     )
     args = parser.parse_args(argv)
 
     config = build_config(args)
     spark = get_spark()
     try:
-        result = run_pipeline(spark, config, infer_schema=args.infer_schema)
+        result = run_pipeline(spark, config, full_refresh=args.full_refresh)
         print_run_report(result)
         target = config.namespace if config.uses_catalog else config.lakehouse_dir
         print(f"Tables written to {target}")

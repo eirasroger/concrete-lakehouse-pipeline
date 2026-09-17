@@ -1,0 +1,42 @@
+[
+  {
+    "id": "control_gwp_777",
+    "labelled_alternatives": [
+      {
+        "id_prod": "prod_1",
+        "pref": 0.91,
+        "conf": 1.0,
+        "reason": "Control Case: GWP 0.08 results in base score 0.9 + noise."
+      },
+      {
+        "id_prod": "prod_2",
+        "pref": 0.24,
+        "conf": 1.0,
+        "reason": "Control Case: GWP 0.44 results in base score 0.2 + noise."
+      }
+    ]
+  },
+  {
+    "id": "expert_9",
+    "labelled_alternatives": [
+      {
+        "id_prod": "prod_1",
+        "pref": 0.66,
+        "conf": 0.7,
+        "reason": "Expert decision"
+      },
+      {
+        "id_prod": "prod_2",
+        "pref": 0.88,
+        "conf": 0.8,
+        "reason": "Expert decision"
+      },
+      {
+        "id_prod": "prod_3",
+        "pref": 0.45,
+        "conf": 0.65,
+        "reason": "Expert decision"
+      }
+    ]
+  }
+]

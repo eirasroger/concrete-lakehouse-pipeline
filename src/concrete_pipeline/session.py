@@ -70,6 +70,7 @@ def get_spark(
     app_name: str = "concrete-data-pipeline",
     shuffle_partitions: int = 8,
     extra_conf: dict[str, str] | None = None,
+    local_threads: int = 2,
 ) -> SparkSession:
     """Return an active Spark session with Delta Lake enabled.
 
@@ -93,9 +94,21 @@ def get_spark(
 
     _warn_if_windows_native_missing()
 
+    # Set before the JVM starts: SPARK_LOCAL_IP is the lowest-level knob for the
+    # address Spark binds and advertises, and it keeps the driver host, the bind
+    # address and the block manager's own registration consistent. Setting only
+    # the spark.driver.* configs leaves the BlockManager free to register under a
+    # different name, which surfaces as a heartbeat failing forever with
+    # "NullPointerException ... idWithoutTopologyInfo is null".
+    os.environ.setdefault("SPARK_LOCAL_IP", "127.0.0.1")
+
     builder = (
         SparkSession.builder.appName(app_name)
-        .master("local[*]")
+        # Not local[*]. Every executor thread registers its own BlockManager, and
+        # concurrent registrations race in Spark's BlockManagerId cache -- on a
+        # many-core machine that intermittently wedges the driver's heartbeat.
+        # Two threads is plenty for data this size and makes runs reproducible.
+        .master(f"local[{local_threads}]")
         .config("spark.sql.extensions", DELTA_EXTENSION)
         .config("spark.sql.catalog.spark_catalog", DELTA_CATALOG)
         .config("spark.sql.shuffle.partitions", str(shuffle_partitions))

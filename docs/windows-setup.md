@@ -51,6 +51,41 @@ correlation with it.
 `validation.py` rebuilds the correlation from `covar_samp` and `stddev_samp`
 using `try_divide`, which returns null for that case instead of throwing.
 
+## "idWithoutTopologyInfo is null"
+
+A run stalls, then the log fills with:
+
+```
+ERROR Inbox: Ignoring error
+java.lang.NullPointerException: Cannot invoke
+  "org.apache.spark.storage.BlockManagerId.executorId()"
+  because "idWithoutTopologyInfo" is null
+WARN Executor: Issue communicating with driver in heartbeater
+```
+
+This is the driver's heartbeat failing, and the message points nowhere near the
+cause. Three things contribute, and the pipeline addresses all three:
+
+1. **Host/bind mismatch.** `spark.driver.host` and `spark.driver.bindAddress`
+   must agree. Setting one to `localhost` and the other to `127.0.0.1` can
+   resolve to IPv6 and IPv4 respectively, so nothing can reach the driver.
+   `session.py` pins both to the literal `127.0.0.1` and sets `SPARK_LOCAL_IP`.
+2. **Too many local threads.** `local[*]` registers one BlockManager per core,
+   and concurrent registrations race in Spark's `BlockManagerId` cache. The
+   default is now `local[2]`, overridable via `get_spark(local_threads=...)`.
+3. **Heap exhaustion.** This is the one that actually bites under load. The
+   driver does not raise `OutOfMemoryError` — it stalls in garbage collection,
+   misses heartbeats, and dies with the NPE above. Spark's default is 1 GB,
+   which is not enough once `MERGE` and cached tables are involved.
+
+If you hit it anyway, raise the heap before the JVM starts:
+
+```powershell
+$env:PYSPARK_SUBMIT_ARGS = "--driver-memory 4g pyspark-shell"
+```
+
+The test suite sets this itself in `tests/conftest.py`.
+
 ## Driver memory
 
 Both raw files are a single pretty-printed JSON array, so Spark must read each

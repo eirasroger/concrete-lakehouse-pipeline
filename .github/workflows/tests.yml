@@ -48,11 +48,41 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # Fast first: the Spark-free tests take about a second, so a broken
+      # classifier or config fails the build before the JVM has even started.
+      - name: Run fast tests
+        run: pytest -m "not spark" -q
+
       # The suite runs against tests/fixtures only; the raw CORA.RDR files are
       # not in the repo and are not needed here.
-      - name: Run tests
+      - name: Run full suite
         run: pytest -q
 
       - name: Check the exploration script runs without the raw files
         run: |
           python scripts/explore_raw.py --raw-dir tests/fixtures
+
+      # A typo in databricks.yml should not wait for a deploy to be noticed.
+      # This is a structural check only -- `databricks bundle validate` resolves
+      # the current user through the API, so it needs real workspace credentials
+      # and belongs in a local deploy, not in CI.
+      - name: Check the bundle definition parses
+        run: |
+          python - <<'PY'
+          import sys, yaml
+          bundle = yaml.safe_load(open("databricks.yml"))
+          job = bundle["resources"]["jobs"]["concrete_pipeline"]
+          tasks = {t["task_key"] for t in job["tasks"]}
+          assert tasks == {"build_tables", "validate_gold", "maintain_tables"}, tasks
+          assert bundle["artifacts"]["concrete_pipeline"]["type"] == "whl"
+          assert set(bundle["targets"]) == {"dev", "prod"}
+          for task in job["tasks"]:
+              path = task["spark_python_task"]["python_file"]
+              open(path).close()  # the entry point must actually exist
+          print(f"bundle OK: {len(tasks)} tasks, targets {sorted(bundle['targets'])}")
+          PY
+
+      - name: Build the wheel the bundle deploys
+        run: |
+          pip install build
+          python -m build --wheel

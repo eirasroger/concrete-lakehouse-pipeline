@@ -96,7 +96,9 @@ def diff_versions(
         *KEYS, F.col("source_type").alias("after")
     )
 
-    joined = before.join(after, on=KEYS, how="fullouter").cache()
+    # Not cached: Databricks serverless rejects PERSIST outright, and cache()
+    # is lazy so the failure would surface later, at an unrelated action.
+    joined = before.join(after, on=KEYS, how="fullouter")
 
     changed = joined.filter(
         F.col("before").isNotNull()
@@ -153,7 +155,6 @@ def diff_versions(
             f"{new_count - old_count:>+12,}"
         )
 
-    joined.unpersist()
 
 
 def main(argv: list[str] | None = None) -> int:

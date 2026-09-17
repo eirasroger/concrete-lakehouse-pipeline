@@ -1,0 +1,123 @@
+[
+  {
+    "id": "control_health_1068",
+    "labelled_alternatives": [
+      {
+        "id_prod": "prod_1",
+        "pref": 0.5,
+        "conf": 1.0,
+        "reason": "Health control: health=1, base score=0.5 + noise. REVISED."
+      },
+      {
+        "id_prod": "prod_2",
+        "pref": 1.0,
+        "conf": 1.0,
+        "reason": "Health control: health=6, base score=1.0 + noise."
+      },
+      {
+        "id_prod": "prod_3",
+        "pref": 0.0,
+        "conf": 1.0,
+        "reason": "Health control: health=0, base score=0.0 + noise."
+      }
+    ]
+  },
+  {
+    "id": "control_archfinish_slump_299",
+    "labelled_alternatives": [
+      {
+        "id_prod": "prod_1",
+        "pref": 0.609,
+        "conf": 1.0,
+        "reason": "Architectural finish control (slump): slump=15.5 mm, base score=0.609 + noise. circ_orig=0% (neutral)."
+      },
+      {
+        "id_prod": "prod_2",
+        "pref": 0.817,
+        "conf": 1.0,
+        "reason": "Architectural finish control (slump): slump=145.9 mm, base score=0.817 + noise. circ_orig=1% (neutral)."
+      }
+    ]
+  },
+  {
+    "id": "3782",
+    "labelled_alternatives": [
+      {
+        "id_prod": "prod_2",
+        "pref": 0.85,
+        "conf": 0.92,
+        "reason": "Lowest density (best for thermal insulation), high health score, high workability (slump), and practical aggregate size make it attractive for a pragmatic contractor despite higher w/c and moderate impacts."
+      },
+      {
+        "id_prod": "prod_1",
+        "pref": 0.74,
+        "conf": 0.88,
+        "reason": "Balanced option: solid compressive strength and workability with mid-range environmental impacts, though circular origin is only moderate."
+      },
+      {
+        "id_prod": "prod_4",
+        "pref": 0.58,
+        "conf": 0.81,
+        "reason": "Acceptable strength and finish, but the highest water demand in the set and weak thermal performance hold it back."
+      },
+      {
+        "id_prod": "prod_3",
+        "pref": 0.29,
+        "conf": 0.9,
+        "reason": "Highest global warming potential and lowest circular origin, with trace hazardous waste; poor fit for a cost-conscious but impact-aware brief."
+      }
+    ]
+  },
+  {
+    "id": "expert_118",
+    "labelled_alternatives": [
+      {
+        "id_prod": "prod_1",
+        "pref": 0.7,
+        "conf": 0.7,
+        "reason": "Expert decision"
+      },
+      {
+        "id_prod": "prod_2",
+        "pref": 0.85,
+        "conf": 0.75,
+        "reason": "Expert decision"
+      }
+    ]
+  },
+  {
+    "id": "2647",
+    "labelled_alternatives": [
+      {
+        "id_prod": "prod_1",
+        "pref": 0.62,
+        "conf": 0.75,
+        "reason": "Decent circular origin (48%) and no hazardous waste, but missing recyclability data and high inert disposal weaken the case."
+      },
+      {
+        "id_prod": "prod_2",
+        "pref": 0.91,
+        "conf": 0.95,
+        "reason": "Top health score with no hazardous waste, strong recyclability, and good workability for a standard structural pour."
+      },
+      {
+        "id_prod": "prod_3",
+        "pref": 0.78,
+        "conf": 0.88,
+        "reason": "Good health score and balanced impacts, slightly behind on circularity and strength."
+      },
+      {
+        "id_prod": "prod_4",
+        "pref": 0.15,
+        "conf": 0.93,
+        "reason": "Trace hazardous waste and a low health score rule this out for a health and safety focused stakeholder."
+      },
+      {
+        "id_prod": "prod_5",
+        "pref": 0.97,
+        "conf": 0.9,
+        "reason": "Best environmental profile in the set with the top health score and high recyclability. REVISED: pref corrected from 1.4."
+      }
+    ]
+  }
+]

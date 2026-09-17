@@ -29,6 +29,13 @@ where = ["src"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q --strict-markers"
+# Spark-backed tests each cost seconds (a JVM job per assertion, and MERGE is
+# several). Marking them lets the pure-Python logic be checked in about a second:
+#   pytest -m "not spark"     fast feedback
+#   pytest                    everything
+markers = [
+    "spark: needs a live Spark session (slow)",
+]
 filterwarnings = [
     # PySpark 4 on Python 3.12+ is noisy about these and they are not ours.
     "ignore::DeprecationWarning",

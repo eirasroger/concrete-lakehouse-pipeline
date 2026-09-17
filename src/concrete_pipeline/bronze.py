@@ -1,8 +1,13 @@
-"""Bronze layer: land both raw JSON files in Delta, unchanged.
+"""Bronze layer: land raw files in Delta, unchanged, append-only.
 
-No reshaping happens here. The nested `labelled_alternatives` / `alternatives`
-arrays stay nested; the only added columns are ingestion metadata, so a bronze
-table can always be traced back to the file and run that produced it.
+No reshaping. The nested arrays stay nested; the only added columns are
+provenance (`_source_file`, `_file_hash`, `_batch_id`, `_ingested_at`) and the
+`_rescued_data` column that catches anything the schema did not expect.
+
+Bronze is **append-only**, so it accumulates every version of every file ever
+ingested. That is the point: when a re-release replaces `frozen_dataset.json`,
+the previous contents are still there to diff against. `current_bronze()`
+resolves the newest version per file name for downstream layers.
 """
 
 from __future__ import annotations
@@ -11,62 +16,39 @@ from pathlib import Path
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
+from pyspark.sql.window import Window
 
 from . import config as cfg
+from . import ingest
 from .schemas import FEATURES_SCHEMA, LABELS_SCHEMA
 
 
-def _read_json(
-    spark: SparkSession,
-    path: Path,
-    schema,
-    infer_schema: bool = False,
-) -> DataFrame:
-    """Read a pretty-printed JSON array into a DataFrame.
-
-    Both files are a single multi-line JSON array, so `multiLine` is required --
-    without it Spark expects one object per line and yields all-null rows.
-    """
-    reader = spark.read.option("multiLine", "true")
-    if infer_schema:
-        return reader.json(str(path))
-    return reader.schema(schema).json(str(path))
-
-
-def _with_ingest_metadata(df: DataFrame, source_file: Path) -> DataFrame:
-    return df.withColumn("_source_file", F.lit(source_file.name)).withColumn(
-        "_ingested_at", F.current_timestamp()
-    )
-
-
-def load_labels(
-    spark: SparkSession, config: cfg.PipelineConfig, infer_schema: bool = False
-) -> DataFrame:
-    """Raw `labelled_alternatives.json` as-is, plus ingestion metadata."""
-    path = config.resolve_label_file()
-    return _with_ingest_metadata(_read_json(spark, path, LABELS_SCHEMA, infer_schema), path)
-
-
-def load_features(
-    spark: SparkSession, config: cfg.PipelineConfig, infer_schema: bool = False
-) -> DataFrame:
-    """Raw `frozen_dataset.json` as-is, plus ingestion metadata."""
-    path = config.resolve_feature_file()
-    return _with_ingest_metadata(_read_json(spark, path, FEATURES_SCHEMA, infer_schema), path)
+def table_exists(spark: SparkSession, config: cfg.PipelineConfig, table: str) -> bool:
+    """Whether a table has been created yet -- true after the first run."""
+    ref = config.table_ref(table)
+    if config.uses_catalog:
+        return spark.catalog.tableExists(ref)
+    return (Path(ref) / "_delta_log").exists()
 
 
 def write_delta(df: DataFrame, config: cfg.PipelineConfig, table: str) -> str:
-    """Overwrite a Delta table and return how to address it.
+    """Overwrite a Delta table. Used for derived tables rebuilt in full."""
+    return _write(df, config, table, mode="overwrite")
 
-    `overwriteSchema` is set because re-running the pipeline after a schema
-    change should replace the table rather than fail on a mismatch -- these are
-    derived tables, rebuilt from the raw files on every run.
 
-    On Databricks this becomes a Unity Catalog managed table; locally it is a
-    folder of parquet plus a `_delta_log`. Same DataFrame either way.
-    """
+def append_delta(df: DataFrame, config: cfg.PipelineConfig, table: str) -> str:
+    """Append to a Delta table, creating it on first use."""
+    return _write(df, config, table, mode="append")
+
+
+def _write(df: DataFrame, config: cfg.PipelineConfig, table: str, mode: str) -> str:
     ref = config.table_ref(table)
-    writer = df.write.format("delta").mode("overwrite").option("overwriteSchema", "true")
+    writer = df.write.format("delta").mode(mode)
+    if mode == "overwrite":
+        writer = writer.option("overwriteSchema", "true")
+    else:
+        # A later release may add a field; let it land rather than fail the run.
+        writer = writer.option("mergeSchema", "true")
     if config.uses_catalog:
         writer.saveAsTable(ref)
     else:
@@ -82,7 +64,7 @@ def read_delta(spark: SparkSession, config: cfg.PipelineConfig, table: str) -> D
 
 
 def delta_table(spark: SparkSession, config: cfg.PipelineConfig, table: str):
-    """The `DeltaTable` handle, for history and time travel."""
+    """The `DeltaTable` handle, for history, time travel and merges."""
     from delta.tables import DeltaTable
 
     ref = config.table_ref(table)
@@ -106,17 +88,86 @@ def read_delta_version(
     return reader.load(config.table_ref(table))
 
 
-def build_bronze(
-    spark: SparkSession, config: cfg.PipelineConfig, infer_schema: bool = False
-) -> dict[str, DataFrame]:
-    """Write `bronze_labels` and `bronze_features`, returning both DataFrames."""
-    labels = load_labels(spark, config, infer_schema)
-    features = load_features(spark, config, infer_schema)
+def enable_change_feed(spark: SparkSession, config: cfg.PipelineConfig, table: str) -> None:
+    """Turn on Change Data Feed so downstream layers can see what moved.
 
-    write_delta(labels, config, cfg.BRONZE_LABELS)
-    write_delta(features, config, cfg.BRONZE_FEATURES)
+    Set after creation rather than at write time: the property has to exist on
+    the table before the commit whose changes you want to read.
+    """
+    spark.sql(
+        f"ALTER TABLE {_sql_ref(config, table)} "
+        "SET TBLPROPERTIES (delta.enableChangeDataFeed = true)"
+    )
 
-    return {
-        cfg.BRONZE_LABELS: read_delta(spark, config, cfg.BRONZE_LABELS),
-        cfg.BRONZE_FEATURES: read_delta(spark, config, cfg.BRONZE_FEATURES),
+
+def _sql_ref(config: cfg.PipelineConfig, table: str) -> str:
+    """How to name a table inside a SQL statement."""
+    if config.uses_catalog:
+        return config.table_ref(table)
+    return f"delta.`{config.table_ref(table)}`"
+
+
+def current_bronze(df: DataFrame) -> DataFrame:
+    """Keep only the newest ingested version of each source file.
+
+    Bronze holds every version ever landed. Downstream wants one: the latest
+    batch per file name. Ranking by `_batch_id` (a UTC timestamp string) rather
+    than `_ingested_at` keeps this deterministic when several files land inside
+    the same second.
+    """
+    newest = Window.partitionBy("_source_file").orderBy(F.col("_batch_id").desc())
+    return (
+        df.withColumn("_rank", F.dense_rank().over(newest))
+        .filter(F.col("_rank") == 1)
+        .drop("_rank")
+    )
+
+
+def ingest_bronze(
+    spark: SparkSession, config: cfg.PipelineConfig
+) -> tuple[dict[str, DataFrame], list[ingest.SourceFile], str]:
+    """Land any raw file whose content has not been seen before.
+
+    Returns the current bronze tables, the files consumed by this batch (empty
+    when there was nothing new), and the batch id.
+    """
+    batch_id = ingest.new_batch_id()
+    sources = ingest.describe_sources(config)
+    pending = ingest.pending_sources(spark, config, sources)
+
+    by_kind = {
+        "labels": ([s for s in pending if s.kind == "labels"], LABELS_SCHEMA, cfg.BRONZE_LABELS),
+        "features": (
+            [s for s in pending if s.kind == "features"],
+            FEATURES_SCHEMA,
+            cfg.BRONZE_FEATURES,
+        ),
     }
+
+    row_counts: dict[str, int] = {}
+    for _, (files, schema, table) in by_kind.items():
+        frame = ingest.read_sources(spark, config, files, schema, batch_id)
+        if frame is None:
+            continue
+
+        append_delta(frame, config, table)
+
+        # Count from the table just written, not from the source frame.
+        # Counting first would need the frame cached to avoid re-parsing the
+        # JSON, and `cache()` is rejected outright on Databricks serverless
+        # ("PERSIST TABLE is not supported"). Reading back this batch's rows is
+        # a cheap columnar scan and works on every runtime.
+        written = read_delta(spark, config, table).filter(F.col("_batch_id") == batch_id)
+        for row in written.groupBy("_source_file").count().collect():
+            row_counts[row["_source_file"]] = row["count"]
+
+    ingest.record_ingestion(spark, config, pending, row_counts, batch_id)
+
+    return (
+        {
+            cfg.BRONZE_LABELS: current_bronze(read_delta(spark, config, cfg.BRONZE_LABELS)),
+            cfg.BRONZE_FEATURES: current_bronze(read_delta(spark, config, cfg.BRONZE_FEATURES)),
+        },
+        pending,
+        batch_id,
+    )

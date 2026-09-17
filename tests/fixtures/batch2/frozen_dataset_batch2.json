@@ -1,0 +1,149 @@
+[
+  {
+    "id": "control_gwp_777",
+    "stakeholder_preference": [
+      "Sustainability maximalist: tends to prioritise low environmental impact and high circularity above other considerations."
+    ],
+    "situations": [
+      "Standard structural application"
+    ],
+    "alternatives": [
+      {
+        "id_prod": "prod_1",
+        "circ_orig": 64,
+        "fu_recyc": 86,
+        "fu_incin": 0,
+        "fu_inert": 14,
+        "fu_haz": 0,
+        "health": 5,
+        "gwp": 0.08,
+        "wdp": 0.0451,
+        "fwu": 0.00074,
+        "b": 0.212,
+        "c": {
+          "c_p": 0.068,
+          "c_w": 0.013,
+          "c_m": 0.015
+        },
+        "compressive_strength": 47.2,
+        "slump": 172.4,
+        "water_to_cement_ratio": 0.371,
+        "cement_content": 346,
+        "SCM_content": 152,
+        "density": 2391,
+        "d_max": 14.0
+      },
+      {
+        "id_prod": "prod_2",
+        "circ_orig": 61,
+        "fu_recyc": 84,
+        "fu_incin": 1,
+        "fu_inert": 15,
+        "fu_haz": 0,
+        "health": 5,
+        "gwp": 0.44,
+        "wdp": 0.1712,
+        "fwu": 0.00331,
+        "b": 0.208,
+        "c": {
+          "c_p": 0.219,
+          "c_w": 0.049,
+          "c_m": 0.031
+        },
+        "compressive_strength": 46.8,
+        "slump": 169.9,
+        "water_to_cement_ratio": 0.376,
+        "cement_content": 351,
+        "SCM_content": 148,
+        "density": 2388,
+        "d_max": 14.0
+      }
+    ]
+  },
+  {
+    "id": "expert_9",
+    "stakeholder_preference": [
+      "Pragmatic contractor: tends to prioritise buildability, workability, and schedule certainty."
+    ],
+    "situations": [
+      "Acoustic insulation"
+    ],
+    "alternatives": [
+      {
+        "id_prod": "prod_1",
+        "circ_orig": 52,
+        "fu_recyc": 78,
+        "fu_incin": 0,
+        "fu_inert": 22,
+        "fu_haz": 0,
+        "health": 4,
+        "gwp": 0.147,
+        "wdp": 0.0819,
+        "fwu": 0.00133,
+        "b": 0.164,
+        "c": {
+          "c_p": 0.089,
+          "c_w": 0.02,
+          "c_m": 0.018
+        },
+        "compressive_strength": 41.3,
+        "slump": 148.6,
+        "water_to_cement_ratio": 0.419,
+        "cement_content": 362,
+        "SCM_content": 118,
+        "density": 2418,
+        "d_max": 16.0
+      },
+      {
+        "id_prod": "prod_2",
+        "circ_orig": 79,
+        "fu_recyc": 93,
+        "fu_incin": 0,
+        "fu_inert": 7,
+        "fu_haz": 0,
+        "health": 6,
+        "gwp": 0.079,
+        "wdp": 0.0408,
+        "fwu": 0.00069,
+        "b": 0.248,
+        "c": {
+          "c_p": 0.066,
+          "c_w": 0.012,
+          "c_m": 0.014
+        },
+        "compressive_strength": 48.9,
+        "slump": 183.2,
+        "water_to_cement_ratio": 0.364,
+        "cement_content": 344,
+        "SCM_content": 159,
+        "density": 2381,
+        "d_max": 12.0
+      },
+      {
+        "id_prod": "prod_3",
+        "circ_orig": 37,
+        "fu_recyc": 66,
+        "fu_incin": 2,
+        "fu_inert": 31,
+        "fu_haz": 1,
+        "health": 3,
+        "gwp": 0.238,
+        "wdp": 0.1254,
+        "fwu": 0.00204,
+        "b": 0.131,
+        "c": {
+          "c_p": 0.126,
+          "c_w": 0.028,
+          "c_m": 0.023
+        },
+        "compressive_strength": 33.7,
+        "slump": 96.1,
+        "water_to_cement_ratio": 0.482,
+        "cement_content": 388,
+        "SCM_content": 82,
+        "density": 2341,
+        "d_max": 20.0
+      }
+    ]
+  }
+]
