@@ -20,7 +20,7 @@ dependencies = []
 
 [project.optional-dependencies]
 local = ["pyspark>=3.5", "delta-spark>=3.2"]
-dev = ["pyspark>=3.5", "delta-spark>=3.2", "pytest>=8.0", "build>=1.0"]
+dev = ["pyspark>=3.5", "delta-spark>=3.2", "pytest>=8.0", "build>=1.0", "pyyaml>=6.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

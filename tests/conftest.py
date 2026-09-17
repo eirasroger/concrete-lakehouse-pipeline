@@ -30,7 +30,15 @@ os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
 # OutOfMemoryError -- the driver stalls in GC, misses its heartbeats, and the
 # run dies with "NullPointerException ... idWithoutTopologyInfo is null", which
 # says nothing about memory at all.
-os.environ.setdefault("PYSPARK_SUBMIT_ARGS", "--driver-memory 4g pyspark-shell")
+#
+# Asked for rather than assumed: a hosted CI runner has far less RAM than a
+# laptop, and a JVM that cannot reserve its heap fails immediately with
+# "Could not reserve enough space for object heap". Override with
+# CONCRETE_TEST_DRIVER_MEMORY.
+TEST_DRIVER_MEMORY = os.environ.get("CONCRETE_TEST_DRIVER_MEMORY", "2g")
+os.environ.setdefault(
+    "PYSPARK_SUBMIT_ARGS", f"--driver-memory {TEST_DRIVER_MEMORY} pyspark-shell"
+)
 
 from concrete_pipeline import config as cfg  # noqa: E402
 from concrete_pipeline.pipeline import run_pipeline  # noqa: E402

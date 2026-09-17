@@ -17,31 +17,30 @@ jobs:
         python-version: ["3.11", "3.12"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # PySpark needs a JVM. Java 17 covers both delta-spark 3.x and 4.x.
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      # The Maven coordinates delta-spark resolves at session startup are the
-      # slowest part of a cold run; keep them between builds.
-      - name: Cache Ivy jars
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.ivy2
-            ~/.m2/repository
-          key: ivy-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
-          restore-keys: ivy-${{ runner.os }}-
+      # No Ivy cache, deliberately.
+      #
+      # Delta's jars are resolved by `configure_spark_with_delta_pip` at session
+      # startup, and caching ~/.ivy2 makes that resolution non-deterministic: a
+      # partial or stale cache restored under `restore-keys` leaves Ivy
+      # believing it already has what it needs, and the run dies with
+      # "NoClassDefFoundError: io/delta/storage/LogStore" -- delta-spark present,
+      # delta-storage missing. Re-resolving costs about a minute per job and is
+      # worth it for a build that means something.
 
       - name: Install dependencies
         run: |
@@ -53,36 +52,27 @@ jobs:
       - name: Run fast tests
         run: pytest -m "not spark" -q
 
+      # Show what the runner actually has, so a heap that fails to reserve is
+      # obvious in the log rather than a silent early exit.
+      - name: Report runner resources
+        run: |
+          free -h || true
+          nproc || true
+          java -version
+
       # The suite runs against tests/fixtures only; the raw CORA.RDR files are
-      # not in the repo and are not needed here.
+      # not in the repo and are not needed here. `-ra` prints a reason for every
+      # non-passing test, which is what makes a CI failure diagnosable at all.
       - name: Run full suite
-        run: pytest -q
+        run: pytest -q -ra --tb=short
+        env:
+          CONCRETE_TEST_DRIVER_MEMORY: 2g
 
       - name: Check the exploration script runs without the raw files
         run: |
           python scripts/explore_raw.py --raw-dir tests/fixtures
 
-      # A typo in databricks.yml should not wait for a deploy to be noticed.
-      # This is a structural check only -- `databricks bundle validate` resolves
-      # the current user through the API, so it needs real workspace credentials
-      # and belongs in a local deploy, not in CI.
-      - name: Check the bundle definition parses
-        run: |
-          python - <<'PY'
-          import sys, yaml
-          bundle = yaml.safe_load(open("databricks.yml"))
-          job = bundle["resources"]["jobs"]["concrete_pipeline"]
-          tasks = {t["task_key"] for t in job["tasks"]}
-          assert tasks == {"build_tables", "validate_gold", "maintain_tables"}, tasks
-          assert bundle["artifacts"]["concrete_pipeline"]["type"] == "whl"
-          assert set(bundle["targets"]) == {"dev", "prod"}
-          for task in job["tasks"]:
-              path = task["spark_python_task"]["python_file"]
-              open(path).close()  # the entry point must actually exist
-          print(f"bundle OK: {len(tasks)} tasks, targets {sorted(bundle['targets'])}")
-          PY
-
+      # The bundle's structure is asserted in tests/test_bundle.py, which runs
+      # above. This only proves the wheel the bundle deploys actually builds.
       - name: Build the wheel the bundle deploys
-        run: |
-          pip install build
-          python -m build --wheel
+        run: python -m build --wheel

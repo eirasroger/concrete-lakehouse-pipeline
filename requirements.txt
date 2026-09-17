@@ -12,3 +12,6 @@ pytest>=8.0
 
 # Only needed to build the wheel for `databricks bundle deploy`.
 build>=1.0
+
+# Used by tests/test_bundle.py to parse databricks.yml.
+pyyaml>=6.0
