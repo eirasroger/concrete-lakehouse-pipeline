@@ -1,24 +1,20 @@
 # concrete-lakehouse-pipeline
 
-Two messy JSON files turned into one clean, validated table, using PySpark and
-Delta Lake on Databricks.
+Incremental bronze/silver/gold pipeline on Delta Lake and Databricks, turning
+two nested JSON files into one validated table for modelling.
 
-The data is a published research dataset of concrete product recommendations
-([DOI 10.34810/DATA3164](https://doi.org/10.34810/DATA3164)): 42,874 decision
-scenarios, each with a handful of candidate concrete mixes. It arrives as two
-separate files that have to be matched up to be useful — one holds the
-preference scores, the other holds the product properties. Neither is much use
-alone.
-
-## What it does
+Source: a published research dataset of concrete product recommendations
+([DOI 10.34810/DATA3164](https://doi.org/10.34810/DATA3164)) — 42,874 decision
+scenarios with 149,670 candidate mixes, split across two files that have to be
+joined to be useful.
 
 ```mermaid
 flowchart LR
     R1["labelled_alternatives.json<br/>preference scores"] --> B
     R2["frozen_dataset.json<br/>product properties"] --> B
-    B["<b>BRONZE</b><br/>raw files, unchanged"] --> S
-    S["<b>SILVER</b><br/>nested lists unpacked<br/>one row per product"] --> Q
-    Q{"<b>quality gate</b>"} -->|passes| G["<b>GOLD</b><br/>149,668 rows<br/>ready to model on"]
+    B["<b>BRONZE</b><br/>append-only<br/>hashed by content"] --> S
+    S["<b>SILVER</b><br/>exploded, upserted"] --> Q
+    Q{"<b>quality gate</b>"} -->|passes| G["<b>GOLD</b><br/>149,668 rows"]
     Q -->|fails| X["<b>rejected</b><br/>4 rows + reasons"]
 
     style B fill:#f0e0cc,stroke:#c99b5e
@@ -28,136 +24,88 @@ flowchart LR
     style Q fill:#e6eef5,stroke:#6b93b8
 ```
 
-**Bronze** copies the raw files into Delta tables and changes nothing, so
-there's always an untouched original to go back to.
+## Tables
 
-**Silver** unpacks the nesting. In the raw files a scenario contains a list of
-2–5 products; silver flattens that to one row per product, and splits the
-scenario-level fields (stakeholder, situation) into their own tables.
-
-**Gold** joins the two sides on `(scenario, product)`. This is the table you'd
-actually use.
-
-Splitting it this way means a bug in the unpacking is fixed by rebuilding silver
-and gold — no need to touch the 140 MB of raw input again.
-
-## It only processes what changed
-
-A run does not rebuild the tables. It works out what is actually new, and
-touches only that:
-
-1. **Hash every raw file** and compare against `bronze_ingest_log`. Nothing new
-   means the run writes nothing at all.
-2. **Append** unseen files to bronze, tagged with their content hash. Bronze is
-   append-only, so every version of every file it has ever seen is still there.
-3. **Upsert silver** for the scenarios those files contain — insert, update, and
-   **delete rows a scenario has lost**.
-4. **Read silver's Change Data Feed** to find which scenarios actually moved,
-   and recompute gold for exactly those.
-
-Three details in there are the whole design:
-
-**Identifying files by content, not by name.** Two things can happen: a new file
-lands beside the old one, or the same file is replaced with a corrected superset
-— which is what a dataset re-release at a DOI looks like. Auto Loader, the
-obvious tool here, handles the first and **structurally cannot handle the
-second**: it tracks work by file path and deliberately ignores modifications, so
-a rewritten `frozen_dataset.json` is silently skipped. A SHA-256 per file catches
-both with one rule, costs about a second on 140 MB, and makes a re-run a no-op
-instead of a double load.
-
-**Deleting, not just upserting.** If a re-release drops a scenario from 6 labels
-to 3, a merge that only inserts and updates leaves 3 stale rows behind forever,
-and no row count anywhere reveals it — the table just keeps answering with data
-the source no longer contains. So the merge has a third clause, `WHEN NOT
-MATCHED BY SOURCE THEN DELETE`, scoped to the scenarios in the batch.
-
-**Asking the table what changed, not the code.** Gold could be told which
-scenarios were ingested. It reads silver's change feed instead, so a manual
-correction to silver, or a previous run that died between silver and gold, still
-produces the right gold rows.
-
-That last point has a consequence worth stating: `(scenario_id, id_prod)` is
-**not** a unique key — scenarios `2647` and `13122` label `prod_1` twice — and a
-`MERGE` on a non-unique key fails outright. So every silver row carries an
-ordinal from `posexplode`, which is what gives it a stable identity.
-
-## The tables
-
-| Table | One row per | Rows |
+| Table | Grain | Rows |
 |---|---|---|
-| `bronze_ingest_log` | file version consumed, by content hash | 2 |
+| `bronze_ingest_log` | file version, by content hash | 2 |
 | `bronze_labels` / `bronze_features` | scenario, still nested | 42,874 each |
 | `silver_labels` | scenario + label ordinal | 149,672 |
 | `silver_features` | scenario + alternative ordinal | 149,670 |
 | `silver_scenario_stakeholder` | scenario + stakeholder ordinal | 45,146 |
 | `silver_scenario_situation` | scenario + situation ordinal | 43,755 |
 | **`gold_scenarios`** | **label + its product's features** | **149,668** |
-| `gold_scenarios_rejected` | rejected row, with reasons | 4 |
+| `gold_scenarios_rejected` | rejected row + reasons | 4 |
 
-## The quality gate
+## Incremental processing
 
-Before anything reaches gold it gets checked. A row that fails is written to
-`gold_scenarios_rejected` with the reason attached, rather than dropped
-silently. Promoted + rejected always adds up to the joined total.
+Each run hashes every raw file against `bronze_ingest_log`, appends only unseen
+content, upserts silver for the affected scenarios, then uses silver's Change
+Data Feed to recompute exactly the gold rows that moved. A run with nothing new
+writes nothing — ingest drops from 130s to 42s.
 
-| Check | Failures on the real data |
+Three design points:
+
+**Content hashing, not filenames.** Two arrival patterns must work: a new file
+beside the old one, and a file replaced under the same name by a re-release.
+Auto Loader handles the first but tracks paths and ignores modifications, so it
+cannot see the second. SHA-256 per file covers both and runs in open-source
+Spark, keeping the incremental path testable locally.
+
+**The merge deletes.** If a re-release drops a scenario from 6 labels to 3, an
+insert/update-only merge leaves 3 stale rows and no row count reveals it. Hence
+`WHEN NOT MATCHED BY SOURCE THEN DELETE`, scoped per table from that table's own
+source — a shared scope would delete rows a batch never mentioned.
+
+**Ordinals, not product ids.** `(scenario_id, id_prod)` is not unique: scenarios
+`2647` and `13122` label `prod_1` twice. `MERGE` on a non-unique key fails, so
+`posexplode` gives every silver row a stable identity.
+
+Whole-scenario deletion is not handled incrementally — the scope comes from
+scenarios present in the new file. Use `--full-refresh`.
+
+## Quality gate
+
+Failing rows go to `gold_scenarios_rejected` with reasons attached. Promoted +
+rejected always equals the joined total.
+
+| Check | Failures on real data |
 |---|---|
-| `pref` and `conf` between 0 and 1 | 0 |
+| `pref`, `conf` in [0,1] | 0 |
 | No duplicate `(scenario, product)` | **4** |
-| Both files agree on which products a scenario has | 0 |
-| Every label has matching properties, and vice versa | 0 |
+| Both files agree on a scenario's products | 0 |
+| Every label has features, and vice versa | 0 |
 | `compressive_strength` 5–150 MPa | 0 |
 | `water_to_cement_ratio` 0.20–1.00 | 0 |
 | `density` 1200–3000 kg/m³ | 0 |
 
-Those 4 failures are a real error in the source data: scenarios `2647` and
-`13122` each label product `prod_1` **twice**, with contradictory scores (0.62
-at confidence 0.75 against 0.05 at confidence 0.95). Both copies are rejected —
-the source gives no basis for picking a winner. The other products in those
-scenarios promote normally.
+Those 4 are a real defect in the published data: scenarios `2647` and `13122`
+each label `prod_1` twice with contradictory scores (0.62 at conf 0.75 against
+0.05 at conf 0.95). Both copies are rejected; the source gives no basis for
+picking a winner.
 
-**Recording a problem isn't the same as noticing one.** A scheduled job whose
-input has structurally broken would otherwise go green every night while writing
-a progressively emptier gold table. So the run *fails* when:
+The run **fails** when rejections exceed 1% (real data: 0.003%) or any row has
+`source_type = unknown`. `gold_scenarios` also carries Delta `CHECK` constraints
+on `pref`, `conf`, `source_type` and join completeness.
 
-- rejections exceed **1%** of rows (the real data is at 0.003%, a ~300x margin)
-- any row lands with `source_type = unknown`, meaning the scenario ids no longer
-  match any pattern the classifier knows and it needs updating
+## Provenance (`source_type`)
 
-`gold_scenarios` also carries Delta `CHECK` constraints — `pref` and `conf` in
-[0,1], a known `source_type`, both sides of the join present. The gate already
-guarantees these; the constraints make it the *table's* guarantee, so a future
-writer that bypasses this pipeline can't quietly violate it.
-
-## Where the data came from (`source_type`)
-
-The scenario IDs mix three different kinds of data in one file. Every gold row
-is tagged so you can filter or compare them:
-
-| ID looks like | `source_type` | Scenarios |
+| ID shape | `source_type` | Scenarios |
 |---|---|---|
-| `control_health_1068` | `control_synthetic` — synthetic probes, 8 axes | 24,000 |
+| `control_health_1068` | `control_synthetic` — 8 probe axes | 24,000 |
 | `3782` | `llm_generated` | 18,602 |
 | `expert_118` | `expert_annotated` | 272 |
 
-Two traps found by profiling the files (`scripts/explore_raw.py`), both of which
-would corrupt the tagging silently:
+Two traps found by profiling (`scripts/explore_raw.py`): `expert_1..272` and the
+plain IDs `1..272` both count from 1 but are unrelated scenarios sharing no
+products; `control_archfinish` and `control_archfinish_slump` are separate
+probes, not one with a suffix.
 
-- `expert_1..272` and the plain IDs `1..272` both count from 1 but are **completely
-  different scenarios** — none of the 272 pairs share the same products.
-- `control_archfinish` and `control_archfinish_slump` are two separate probes,
-  not one with a suffix.
+## Validation
 
-## Does the output make sense?
-
-A direction check, not a model. If the join paired the wrong label with the
-wrong product, preference wouldn't track anything — and row counts would never
-reveal it, because a mis-keyed join gives you exactly the right number of
-exactly wrong rows.
-
-Each `control_*` family varies one variable and holds the rest steady, so each
-should light up on its own variable and sit near zero elsewhere:
+A direction check, not a model: a mis-keyed join yields the right number of
+wrong rows, which no row count detects. Each `control_*` family varies one
+variable, so each should dominate its own and sit near zero elsewhere.
 
 ```
 control_axis              rows          gwp       health    circ_orig
@@ -171,14 +119,13 @@ fwu                     10,501      -0.0207      +0.0099      +0.0077
 wdp                     10,447      +0.0058      +0.0033      +0.0075
 ```
 
-That diagonal is the result. `archfinish` is negative on `circ_orig` (−0.60) on
-purpose: in that family more recycled content means a worse surface finish.
+`archfinish` is negative on `circ_orig` by construction: more recycled content,
+worse surface finish.
 
 ## Delta time travel
 
-`gold_scenarios` is written with a deliberately buggy `source_type` rule, then
-overwritten with the correct one. Delta keeps both versions, so the fix can be
-diffed:
+`scripts/delta_versioning_demo.py` writes gold with a deliberately buggy
+classifier, corrects it, and diffs the versions:
 
 ```
 11,553 rows reclassified, 0 added, 0 removed
@@ -188,38 +135,45 @@ llm_generated        -> control_synthetic        10,665       3,000
 llm_generated        -> expert_annotated            888         272
 ```
 
-3,000 and 272 — precisely the `archfinish_slump` family and the expert family.
-And the old version is still queryable:
+Exactly the `archfinish_slump` and expert families. The old version stays
+queryable: `SELECT * FROM workspace.concrete.gold_scenarios VERSION AS OF 0`.
 
-```sql
-SELECT * FROM workspace.concrete.gold_scenarios VERSION AS OF 0
+## Running on Databricks
+
+Databricks Free Edition, serverless (DBR 19.6, Photon). One-time setup:
+
+1. **Catalog** → create schema `concrete` in `workspace`, and a volume `raw`
+   inside it.
+2. Upload `labelled_alternatives.json` and `frozen_dataset.json` to the volume.
+3. Clone this repo into Repos.
+
+Then either run `notebooks/01_build_and_validate.py` and
+`notebooks/02_delta_time_travel.py`, or deploy the job:
+
+```bash
+databricks bundle validate -t dev
+databricks bundle deploy   -t dev
+databricks bundle run concrete_pipeline -t dev
 ```
 
-That's the thing you can't do with CSVs.
+`databricks.yml` defines three chained serverless tasks:
 
----
+| Task | Fails when |
+|---|---|
+| `build_tables` | ingestion breaks, or rejections exceed the gate's limits |
+| `validate_gold` | a correlation points the wrong way |
+| `maintain_tables` | `OPTIMIZE`/`VACUUM` fails (168h retention) |
 
-## Running it on Databricks
+Maintenance runs last so a bad batch is never compacted into the table it broke.
+`bundle deploy` builds `src/` into a wheel and installs it into the serverless
+environment; Databricks executes a `python_file` via `exec()`, where `__file__`
+does not exist, so path-based imports cannot work.
 
-Run on **Databricks Free Edition**, serverless compute (Databricks Runtime
-19.6.x, Photon). The row counts and correlations in this README were produced
-there and reproduced byte-for-byte on a local Spark run. One-time setup:
+`dev` deploys under your user folder with the schedule paused; `prod` deploys to
+`/Workspace/Shared` and unpauses the daily 06:00 run. Catalog, schema and volume
+path are bundle variables.
 
-1. **Catalog** → in the `workspace` catalog, create a schema `concrete`, and
-   inside it a **volume** named `raw`.
-2. Upload `labelled_alternatives.json` and `frozen_dataset.json` to that volume.
-3. **Workspace → Repos** → clone this repo (already done if you're reading it there).
-4. Run `notebooks/01_build_and_validate.py`, then `notebooks/02_delta_time_travel.py`.
-
-Both notebooks run on serverless. The first cell prints where it's reading from
-and writing to, so a wrong path fails immediately instead of halfway through.
-
-The tables land in Unity Catalog, so they show up in Catalog Explorer and can be
-queried with plain SQL.
-
-The notebooks contain no logic — they set two paths and call into
-`src/concrete_pipeline/`. The only difference from a laptop run is one config
-line:
+The only difference from a laptop run is one config line:
 
 ```python
 config = PipelineConfig(
@@ -228,58 +182,9 @@ config = PipelineConfig(
 )
 ```
 
-Without `namespace`, the same code writes Delta tables to a local folder.
+## Running locally
 
-## Deploying it as a scheduled job
-
-`databricks.yml` defines the pipeline as a **Databricks Asset Bundle** — a
-scheduled Job, deployed from the command line:
-
-```bash
-databricks bundle validate -t dev
-databricks bundle deploy   -t dev
-databricks bundle run concrete_pipeline -t dev   # trigger it now
-```
-
-Three tasks on serverless compute, chained. Ran green on Free Edition in ~100s
-end to end, producing the same row counts and correlations as the notebook and
-the local run:
-
-| Task | Runs | Fails the job when |
-|---|---|---|
-| `build_tables` | `run_pipeline.py --namespace workspace.concrete` | ingestion breaks, or rejections exceed the gate's limits |
-| `validate_gold` | `validate_gold.py --namespace workspace.concrete` | a correlation points the wrong way |
-| `maintain_tables` | `maintain_tables.py --retain-hours 168` | compaction fails |
-
-Maintenance is last, and off the ingest path, for two reasons: compacting a bad
-batch into the table it broke is worse than leaving it fragmented, and `VACUUM`
-permanently destroys the time travel the versioning demo depends on. A week of
-history is retained.
-
-The job runs **the same entry points a laptop runs**, with `--namespace`
-redirecting the output to Unity Catalog. There is no Databricks-specific copy of
-the logic anywhere.
-
-`bundle deploy` builds `src/` into a wheel and installs it into the serverless
-environment, so `import concrete_pipeline` resolves in the job the same way it
-does in a venv. That is not decoration: Databricks executes a `python_file` via
-`exec()`, where `__file__` does not exist, so the usual
-`sys.path.insert(Path(__file__)...)` trick fails outright. Shipping a package is
-the fix.
-
-Targets: `dev` deploys under your user folder, prefixes the job name with
-`[dev <you>]` and forces the schedule **paused**, so a dev deploy can never
-start firing on its own. `prod` deploys to `/Workspace/Shared` and unpauses the
-daily 06:00 schedule. Catalog, schema and volume path are bundle variables, so
-prod could point at a different catalog without touching code.
-
-A note on the schedule: this dataset is static, so a daily cron is really just
-demonstrating the shape. A real incremental source would use a file-arrival
-trigger with Auto Loader, and bronze would `MERGE` rather than `overwrite`.
-
-## Running it locally
-
-Needs Python 3.10–3.13 (PySpark doesn't support 3.14 yet) and a JDK 17.
+Python 3.10–3.13 and JDK 17.
 
 ```bash
 python -m venv .venv
@@ -287,40 +192,22 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-The raw files are **not** in this repo — they're CC BY-NC 4.0 and ~140 MB. Get
-them from [the DOI](https://doi.org/10.34810/DATA3164) and put them in
-`data/raw/`. Or skip them: every script takes `--fixtures` and runs against a
-5-scenario synthetic stand-in in `tests/fixtures/`.
+The raw files are not committed (CC BY-NC 4.0, ~140 MB). Download from the DOI
+into `data/raw/`, or pass `--fixtures` to run against the synthetic fixture.
 
 ```bash
 python scripts/explore_raw.py            # profile the raw files
-python scripts/run_pipeline.py           # ingest whatever is new
-python scripts/run_pipeline.py --full-refresh   # reprocess every scenario
-python scripts/validate_gold.py          # the direction check
-python scripts/maintain_tables.py        # OPTIMIZE + VACUUM
-python scripts/delta_versioning_demo.py  # the time-travel diff
+python scripts/run_pipeline.py           # ingest what is new
+python scripts/run_pipeline.py --full-refresh
+python scripts/validate_gold.py
+python scripts/maintain_tables.py
+python scripts/delta_versioning_demo.py
 
-pytest -m "not spark"                    # pure logic, ~1s
-pytest                                   # everything, several minutes
+pytest -m "not spark"                    # 34 tests, <2s
+pytest                                   # 113 tests
 ```
 
-Running `run_pipeline.py` twice does nothing the second time — that's the point.
-Use `--full-refresh` after changing the classifier or a transformation, since
-the source files haven't changed but their derived rows have.
-
-Most of the test time is Spark: each assertion is a real job, and `MERGE` is
-several. The `not spark` subset — the classifier, the direction logic, the
-config, and the serverless-portability guards — is 34 of the 113 tests and runs in under 2s. The marker is applied
-automatically based on which fixtures a test requests, so nothing has to be
-labelled by hand.
-
-For a real run, give the driver some room first — both files are one big JSON
-array, so Spark has to read each in a single task:
-
-```bash
-export PYSPARK_SUBMIT_ARGS="--driver-memory 6g pyspark-shell"
-```
-
+Real runs need driver memory: `export PYSPARK_SUBMIT_ARGS="--driver-memory 6g pyspark-shell"`.
 Windows also needs `winutils.exe` and `hadoop.dll` — see
 [docs/windows-setup.md](docs/windows-setup.md).
 
@@ -328,54 +215,50 @@ Windows also needs `winutils.exe` and `hadoop.dll` — see
 
 ```
 src/concrete_pipeline/
-    ingest.py       content hashing, the ingestion log, what to read
-    bronze.py       append-only landing + Delta read/write/time-travel helpers
-    upsert.py       scenario-scoped MERGE, including the delete clause
+    ingest.py       content hashing, ingestion log, what to read
+    bronze.py       append-only landing, Delta read/write/time-travel
+    upsert.py       scenario-scoped MERGE with the delete clause
     silver.py       posexplode into flat tables, then upsert
-    changes.py      Change Data Feed -> which scenarios actually moved
+    changes.py      Change Data Feed -> which scenarios moved
     gold.py         join, gate, upsert, CHECK constraints
-    quality.py      rejection reasons and the failing thresholds
+    quality.py      rejection reasons and failing thresholds
     validation.py   correlation direction checks
     maintenance.py  OPTIMIZE / VACUUM
-    pipeline.py     orchestration and the run report
+    pipeline.py     orchestration and run report
     config.py       paths, namespaces, thresholds, limits
     schemas.py      explicit schemas for both raw files
     session.py      Spark session (local, notebook, or job)
-    source_type.py  the provenance classifier, and its defective ancestor
+    source_type.py  provenance classifier
 
-scripts/                  command-line entry points — also what the Job runs
-notebooks/                the Databricks exploratory view
-databricks.yml            the bundle: pipeline as a scheduled Job
-tests/                    pytest suite + synthetic fixtures
-docs/windows-setup.md     local Windows Spark setup
+scripts/            CLI entry points — also what the Job runs
+notebooks/          Databricks exploratory view
+databricks.yml      the bundle
+tests/              pytest suite + synthetic fixtures
 ```
 
-`src/` holds plain functions over DataFrames and imports nothing from
-Databricks. Everything else is a thin caller: the scripts parse arguments, the
-notebooks set two paths, the bundle schedules the scripts. That is what lets the
-same code run on a laptop and on serverless and produce identical output.
+`src/` is plain functions over DataFrames and imports nothing from Databricks.
+Scripts, notebooks and the bundle are thin callers, so the same code runs on a
+laptop and on serverless with identical output.
 
-Tests run against the fixtures only, so they need neither the raw files nor
-Databricks. 113 of them, including a four-stage integration test that drives a
-first load, a no-op re-run, a new batch arriving, and a file being replaced —
-asserting at each stage that only the affected scenarios moved. CI runs the lot
-on Python 3.11 and 3.12 on every push.
+## Tests
 
-`tests/test_portability.py` is worth a mention: it parses the AST of everything
-under `src/`, `scripts/` and `notebooks/` and fails if it finds `cache()`,
-`persist()` or `.rdd`. Databricks serverless runs on Spark Connect and rejects
-all three, but `cache()` is lazy — so the failure appears minutes into a job
-run, in a stack trace that names a thread pool rather than the line at fault.
-Both of those cost a full deploy-and-run cycle to diagnose before the guard
-existed.
+113 tests against the fixtures only — no raw files, no Databricks. A four-stage
+integration test covers first load, no-op re-run, a new batch, and a replaced
+file, asserting at each stage that only the affected scenarios moved.
+
+`tests/test_portability.py` AST-parses `src/`, `scripts/` and `notebooks/` and
+rejects `cache()`, `persist()` and `.rdd` — all unsupported on Databricks
+serverless, all failing lazily mid-run.
+
+CI runs the suite on Python 3.11 and 3.12 on every push.
 
 ## Citation
 
-Dataset: CORA.RDR, [https://doi.org/10.34810/DATA3164](https://doi.org/10.34810/DATA3164),
-CC BY-NC 4.0 — cite using the string on the DOI landing page.
+Dataset: CORA.RDR, [doi.org/10.34810/DATA3164](https://doi.org/10.34810/DATA3164),
+CC BY-NC 4.0 — use the citation on the DOI landing page.
 
 Paper: *Context-adaptive deep learning for sustainable product recommendation:
 Application to concrete*, Sustainable Production and Consumption, 2026.
 
-This repo is an engineering re-implementation of the dataset's preparation, not
-a redistribution of the data.
+This repository is an engineering re-implementation of the dataset's
+preparation, not a redistribution of the data.
